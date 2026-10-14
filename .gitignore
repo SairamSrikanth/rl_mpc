@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+logs/
+outputs/
+*.mp4
+*.pt
+!results/best.pt
+docs/paper/*.aux
+docs/paper/*.log
+docs/paper/*.out
+.pytest_cache/
+docs/paper/*.fls
+docs/paper/*.fdb_latexmk
