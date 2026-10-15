@@ -313,16 +313,14 @@ python scripts/run_warehouse.py --segment stairs_up --num_envs 64 --headless
 python scripts/run_warehouse.py --segment stairs_down_back --num_envs 64 --headless
 python scripts/run_warehouse.py --segment loop_back --num_envs 32 --seed 11 --headless
 
+# the same 25-waypoint loop with the PPO residual policy instead of the pure MPC
+python scripts/run_warehouse.py --segment loop_back --num_envs 32 --seed 11 --checkpoint results/best.pt --headless
+
 # (the warehouse is the full scene by default: racks, pallets, box piles, barrels and forklifts, dressed with
 #  the real models and guard rails whenever there is a window or a video; --empty gives the bare building)
 
 # a video of robot 0 (use few robots)
 python scripts/run_warehouse.py --segment stairs_up --num_envs 1 --video outputs/stairs_up.mp4 --video_every 2 --headless
-
-# the elevation map the MPC plans on, with the Raibert footholds, beside the chase camera
-python scripts/run_warehouse.py --segment stairs_up --num_envs 1 --seed 11 --video_every 2 --video outputs/chase.mp4 \
-    --follow_eye 2.6,0.0,1.5 --follow_look=-0.8,0.0,0.1 --dump_map outputs/map.npz --headless
-python scripts/render_map_video.py --data outputs/map.npz --chase outputs/chase.mp4 --out outputs/map_footholds.mp4 --behind 0.9
 
 # look at the building in a window (run without --headless)
 python scripts/render_scene.py --gui
