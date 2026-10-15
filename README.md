@@ -4,7 +4,11 @@ Model-based stair and ramp controller for the Spot quadruped in [Isaac Lab](http
 
 This repository compares two ways of improving a model-based legged controller: **learning a residual on top of the MPC with RL (PPO)**, and **searching the MPC's own parameters offline with CMA-ES**. Both are applied to the same controller, in the same simulated warehouse, and scored by the same measure: how many robots finish the route.
 
-<!-- TODO: a GIF or two here: Spot climbing the warehouse staircase, and walking it backward down. `run_warehouse.py --video` records one (see Getting started). -->
+<p align="center">
+  <img src="assets/loop_back_2x.gif" alt="Spot walking the full warehouse loop under the MPC" width="800">
+  <br>
+  <em>One robot, the pure MPC with no learned residual, walking the 90 m loop in the two-floor warehouse at 2x speed: up the staircase, across the upper floor, down and back up the ramp, then backward down the stairs. The upper floor is partly out of frame from this camera.</em>
+</p>
 
 **Contents:** [1. Problem statement](#1-problem-statement) · [2. MPC for legged robots in industrial environments](#2-mpc-for-legged-robots-in-industrial-environments-and-the-baseline) · [3. RL-augmented MPC](#3-rl-augmented-mpc-residuals-and-ppo) · [4. CMA-ES-reinforced MPC](#4-cma-es-reinforced-mpc-parameter-search-and-assumptions) · [5. Results](#5-results) · [6. Limitations](#6-limitations) · [Getting started](#getting-started)
 
