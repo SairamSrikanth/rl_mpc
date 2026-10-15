@@ -7,7 +7,8 @@ ROOT = Path(__file__).resolve().parents[1]
 ap = argparse.ArgumentParser(description="Look at the warehouse: --gui opens the viewer (run without --headless), --preview writes a few fixed views.")
 ap.add_argument("--gui", action="store_true")
 ap.add_argument("--preview", action="store_true")
-ap.add_argument("--dense", action="store_true")
+ap.add_argument("--dense", action="store_true", help="(the default now)")
+ap.add_argument("--empty", action="store_true", help="the bare building: no racks, pallets, forklifts or clutter")
 ap.add_argument("--extra_north", type=float, default=8.0, help="extra ground behind the ramp foot")
 ap.add_argument("--plain", action="store_true", help="show the collision proxies, no props")
 ap.add_argument("--out", default="/tmp/wh_render")
@@ -42,7 +43,7 @@ def build_world():
     from spot_mpc.worlds.warehouse_static.layout import WarehouseCfg
     from spot_mpc.worlds.warehouse_static.world import Warehouse
     cfg = WarehouseCfg()
-    cfg.dense, cfg.extra_north = args.dense, args.extra_north
+    cfg.dense, cfg.extra_north = not args.empty, args.extra_north
     world = Warehouse(cfg)
     world.spawn()
     if not args.plain:

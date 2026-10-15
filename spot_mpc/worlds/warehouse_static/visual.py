@@ -8,7 +8,8 @@ from .layout import GROUND_PRIM, WAREHOUSE_PRIM, EquipmentCfg, light_rows
 DRESS = "/World/Dressing"
 MAT = ROOT + "/NVIDIA/Materials/Base/"
 LIGHT_XS = (-16.0, -8.0, 0.0, 8.0, 16.0)
-BLACK, GREY = (0.015, 0.015, 0.017), (0.16, 0.16, 0.17)
+GREY = (0.16, 0.16, 0.17)
+STAIR, RAMP = (0.80, 0.78, 0.72), (0.72, 0.75, 0.80)      # much lighter than the dark ground, so the robot's black feet show on them
 
 
 class Dresser(UsdBuilder):
@@ -67,12 +68,14 @@ class Dresser(UsdBuilder):
                 for i in range(math.ceil((yh - yl) / 6)):
                     self.ref(g, wall, (s * (fx / 2), -fy / 2 + 3.0 + i * 6.0, z), (0.0 if s < 0 else math.pi), (1, 1, 1), "we")
 
-        mdl = {"UpperFloor": "Masonry/Concrete_Smooth.mdl", "Columns": "Masonry/Concrete_Formed.mdl", "Ramp": "Metals/Steel_Carbon.mdl"}
+        mdl = {"UpperFloor": "Masonry/Concrete_Smooth.mdl", "Columns": "Masonry/Concrete_Formed.mdl"}
         for p in self.wh.prims:
             group = p.name.split("/")[0]
             path = f"{WAREHOUSE_PRIM}/{p.name}"
             if group == "Stairs":
-                self.bind_path(path, BLACK, rough=0.55)
+                self.bind_path(path, STAIR, rough=0.6)
+            if group == "Ramp":
+                self.bind_path(path, RAMP, rough=0.45, metal=0.1)
             if group in mdl:
                 self.bind_mdl(path, MAT + mdl[group], group)
             if group == "Shell":
@@ -174,61 +177,15 @@ class Dresser(UsdBuilder):
         cone = KIT + "S_TrafficCone.usd"
         for x, y, z in [(9.0, 3.2, 0.0), (11.5, 5.0, 0.0), (6.5, 9.0, 0.0), (3.0, 3.0, 3.0)]:
             self.ref(g, cone, (x, y, z), 0.0, (1, 1, 1), "cone")
-        self.edge_rails(g)
-        self.side_rails(g)
+        self.rails(g)
 
-    def edge_rails(self, g):
-        """Guard rail along the drop from the upper floor into the atrium, with openings at the ramp top and the stair top."""
-        cfg = self.cfg
-        z, inset = cfg.upper_floor_top_z, 0.12
-        ex, ey = cfg.atrium_x_min - inset, cfg.atrium_y_min - inset
-        x_end, y_end = cfg.footprint_x / 2 - 0.12, cfg.footprint_y / 2 + cfg.extra_north - 0.12
-        rx = cfg.ramp_bottom_xyz[0]
-        ramp_gap = (rx - cfg.ramp_width / 2 - 0.25, rx + cfg.ramp_width / 2 + 0.25)
-        sy = cfg.stair_base_xy[1]
-        stair_gap = (sy - cfg.step_width / 2 - 0.25, sy + cfg.step_width / 2 + 0.25)
-        self.guard_rail(g, (ex, ey), (ramp_gap[0], ey), z)
-        self.guard_rail(g, (ramp_gap[1], ey), (x_end, ey), z)
-        self.guard_rail(g, (ex, ey), (ex, stair_gap[0]), z)
-        self.guard_rail(g, (ex, stair_gap[1]), (ex, y_end), z)
-
-    def side_rails(self, g):
-        """Short yellow rails just outside the walking width of the stair and the ramp, following the slope."""
-        cfg = self.cfg
-        height, off, post, rail = 0.5, 0.06, 0.05, 0.045
+    def rails(self, g):
+        """The rail colliders, drawn with a painted-metal look (the plain colliders under them are hidden)."""
         look = dict(rough=0.38, metal=0.15)
-
-        def slanted(center, size, quat):
-            self.box(g, center, size, YELLOW, quat, "side", **look)
-
-        x0, y0 = cfg.stair_base_xy
-        run, rise, n = cfg.step_run, cfg.step_rise, cfg.num_steps
-        xa, xb = x0, x0 - run * n
-        za, zb = rise + height, rise + rise / run * (x0 - xb) + height
-        length, pitch = math.hypot(xa - xb, zb - za), math.atan2(zb - za, xa - xb)
-        quat = (math.cos(pitch / 2), 0.0, math.sin(pitch / 2), 0.0)
-        for side in (-1, 1):
-            y = y0 + side * (cfg.step_width / 2 + off)
-            mid = ((xa + xb) / 2, y, (za + zb) / 2)
-            slanted(mid, (length, rail, rail), quat)
-            slanted((mid[0], mid[1], mid[2] - height / 2), (length, 0.02, 0.09), quat)
-            for i in range(0, n + 1, 3):
-                x = x0 - run * i
-                z = rise + rise / run * (x0 - x)
-                self.box(g, (x, y, z + height / 2 - 0.07), (post, post, height + 0.14), YELLOW, name="post", **look)
-
-        (rx, ry0, rz0), (_, ry1, rz1) = cfg.ramp_bottom_xyz, cfg.ramp_top_xyz
-        length = math.hypot(ry0 - ry1, rz1 - rz0)
-        angle = math.atan2(rz1 - rz0, ry1 - ry0)
-        quat = (math.cos(angle / 2), math.sin(angle / 2), 0.0, 0.0)
-        for side in (-1, 1):
-            x = rx + side * (cfg.ramp_width / 2 + off)
-            c = (x, (ry0 + ry1) / 2, (rz0 + rz1) / 2 + height)
-            slanted(c, (rail, length, rail), quat)
-            slanted((c[0], c[1], c[2] - height / 2), (0.02, length, 0.09), quat)
-            for t in np.linspace(0.0, 1.0, max(2, math.ceil(length / 1.5) + 1)):
-                y, z = ry0 + t * (ry1 - ry0), rz0 + t * (rz1 - rz0)
-                self.box(g, (x, y, z + height / 2 - 0.07), (post, post, height + 0.14), YELLOW, name="post", **look)
+        for p in self.wh.rails:
+            self.hide(f"{WAREHOUSE_PRIM}/{p.name}")
+            q = None if p.quat == (1.0, 0.0, 0.0, 0.0) else p.quat
+            self.box(g, p.pos, p.size, YELLOW, q, "rail", **look)
 
 
 def dress(wh):

@@ -64,7 +64,7 @@ class PrimWorld:
         pass
 
     def spawn(self):
-        spawn_colliders(self.prims, WAREHOUSE_PRIM, self.cfg.friction)
+        spawn_colliders(self.prims, WAREHOUSE_PRIM, self.cfg.friction, getattr(self, "rails", ()))
         self.add_lights()
 
     def spawn_ray_mesh(self):

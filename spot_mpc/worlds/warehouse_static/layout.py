@@ -42,6 +42,7 @@ class WarehouseCfg:
     dense: bool = False          # fill both floors and the atrium with racks, pallets and clutter
     dense_seed: int = 7
     visual: bool = False         # dress the collision proxies with NVIDIA props (needs cameras)
+    rails: bool = True           # guard rail at the atrium edge and rails beside the stair and the ramp: they stop the robot, the sensors do not see them
 
 
 @dataclass
@@ -80,7 +81,7 @@ class EquipmentCfg:
 
 
 COLORS = dict(
-    wall=(0.72, 0.70, 0.63), upper=(0.50, 0.52, 0.55), stair=(0.55, 0.55, 0.58), ramp=(0.55, 0.50, 0.42),
+    wall=(0.72, 0.70, 0.63), upper=(0.50, 0.52, 0.55), stair=(0.80, 0.78, 0.72), ramp=(0.72, 0.75, 0.80),
     column=(0.42, 0.42, 0.44), shelf_post=(0.30, 0.30, 0.35), shelf_deck=(0.60, 0.50, 0.35), pallet=(0.65, 0.50, 0.30),
     box=(0.72, 0.55, 0.35), barrel_blue=(0.15, 0.35, 0.65), barrel_red=(0.70, 0.15, 0.15),
     forklift_hi=(1.00, 0.75, 0.10), forklift_lo=(0.15, 0.15, 0.17),

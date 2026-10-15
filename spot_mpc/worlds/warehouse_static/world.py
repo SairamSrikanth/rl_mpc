@@ -2,6 +2,7 @@ import torch
 
 from ..prim_world import PrimWorld
 from .layout import WAREHOUSE_PRIM, light_rows, warehouse_prims
+from .rails import rail_prims
 
 LIGHT_XS = (-16.0, -8.0, 0.0, 8.0, 16.0)
 
@@ -14,6 +15,7 @@ class Warehouse(PrimWorld):
     def __init__(self, cfg, device="cpu"):
         super().__init__(cfg, device)
         self.stairs_top = cfg.num_steps * cfg.step_rise
+        self.rails = rail_prims(cfg) if cfg.rails else []
 
     def make_prims(self, cfg):
         return warehouse_prims(cfg)

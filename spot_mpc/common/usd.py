@@ -101,23 +101,6 @@ class UsdBuilder:
         im = q.GetImaginary()
         return self.box(parent, (a + b) / 2, (length, thick, thick), color, (q.GetReal(), im[0], im[1], im[2]), name, **kw)
 
-    def guard_rail(self, parent, p0, p1, z):
-        """Yellow guard rail from p0 to p1 (axis-aligned) at floor height z: posts every 1.5 m, top and middle rail, toe board."""
-        p0, p1 = np.array(p0, float), np.array(p1, float)
-        length = float(np.linalg.norm(p1 - p0))
-        if length < 0.2:
-            return
-        d = (p1 - p0) / length
-        n = max(1, math.ceil(length / 1.5))
-        look = dict(rough=0.38, metal=0.15)
-        for i in range(n + 1):
-            p = p0 + d * length * i / n
-            self.box(parent, (p[0], p[1], z + 0.55), (0.06, 0.06, 1.1), YELLOW, name="post", **look)
-        c = (p0 + p1) / 2
-        for h, thick, height in ((1.05, 0.05, 0.05), (0.55, 0.05, 0.05), (0.05, 0.02, 0.10)):
-            size = (length, thick, height) if abs(d[0]) > 0.5 else (thick, length, height)
-            self.box(parent, (c[0], c[1], z + h), size, YELLOW, name="bar", **look)
-
     def strip_physics(self, root=None, uninstance=True):
         """Remove every physics schema and deactivate joints on imported assets: they are scenery.
         Instanced assets can only be edited after un-instancing them; with uninstance=False they are skipped."""

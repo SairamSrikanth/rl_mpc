@@ -6,17 +6,18 @@ from spot_mpc.worlds.warehouse_static import layout as L
 from spot_mpc.worlds.warehouse_static.world import Warehouse
 
 ap = argparse.ArgumentParser(description="Geometry-only check of the static warehouse loop: how close does it come to any prop at the robot's height?")
-ap.add_argument("--dense", action="store_true")
+ap.add_argument("--dense", action="store_true", help="(the default now)")
+ap.add_argument("--empty", action="store_true", help="the bare building")
 ap.add_argument("--need", type=float, default=0.6, help="required clearance from the path centre [m]")
 ap.add_argument("--extra_north", type=float, default=8.0)
 args = ap.parse_args()
 
 cfg = L.WarehouseCfg()
-cfg.dense, cfg.extra_north = args.dense, args.extra_north
+cfg.dense, cfg.extra_north = not args.empty, args.extra_north
 world = Warehouse(cfg)
 route = L.LOOP_BACK_WAYPOINTS
 structure = ("Stairs", "Ramp", "UpperFloor", "Shell")
-solid = [p for p in world.prims if p.name.split("/")[0] not in structure]
+solid = [p for p in world.prims if p.name.split("/")[0] not in structure] + world.rails
 
 
 def distance(p, x, y):
@@ -71,7 +72,7 @@ for x, y in points:
             closest = (d, (x, y, z, p.name))
         if d < args.need:
             too_close.setdefault(p.name, (round(x, 2), round(y, 2), round(z, 2), round(d, 2)))
-print(f"[route] dense={args.dense}: {len(points)} samples, {len(solid)} solid props, closest approach {closest[0]:.2f} m at {closest[1]}")
+print(f"[route] dense={not args.empty}: {len(points)} samples, {len(solid)} solid props, closest approach {closest[0]:.2f} m at {closest[1]}")
 print(f"[route] props closer than {args.need} m: {len(too_close)}")
 for name, hit in list(too_close.items())[:15]:
     print("   ", name, hit)

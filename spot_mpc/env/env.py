@@ -291,6 +291,7 @@ class SpotMpcEnv(DirectRLEnv):
         self.swing.observe(c_now, feet)
         terrain = self.terrain
         anchor = self.gov.update(self.xe, self.cmd)
+        self.anchor = anchor
         x_ref, r, contact = gs.build_horizon(self.P, terrain, self.gait, self.xe, self.cmd, feet, anchor, self.h_ref, self.foot_res)
 
         # the previewed slope along the direction of travel picks the operating point for the next tick

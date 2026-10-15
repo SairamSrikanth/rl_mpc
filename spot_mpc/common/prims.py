@@ -77,13 +77,13 @@ def build_ray_mesh(prims, path):
     mesh.GetVisibilityAttr().Set(UsdGeom.Tokens.invisible)
 
 
-def spawn_colliders(prims, root, friction):
-    """Ground plane plus one PhysX collider per primitive under `root`."""
+def spawn_colliders(prims, root, friction, extra=()):
+    """Ground plane plus one PhysX collider per primitive under `root`; `extra` are colliders that are not in the ray mesh or in surface() (the rails)."""
     import isaaclab.sim as sim_utils
     mat = sim_utils.RigidBodyMaterialCfg(static_friction=friction, dynamic_friction=friction, restitution=0.0)
     sim_utils.spawn_ground_plane("/World/ground", sim_utils.GroundPlaneCfg(physics_material=mat))
     col = sim_utils.CollisionPropertiesCfg()
-    for p in prims:
+    for p in [*prims, *extra]:
         vis = sim_utils.PreviewSurfaceCfg(diffuse_color=p.color)
         if p.kind == "box":
             cfg = sim_utils.CuboidCfg(size=p.size, collision_props=col, physics_material=mat, visual_material=vis)
