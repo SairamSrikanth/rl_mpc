@@ -92,8 +92,9 @@ class GeneralTask(SpotTask):
         dist = (self.goal_xy - x0[:, 3:5]).norm(dim=-1)
         self.success = (dist < self.cfg.goal_radius) & ~fell & (self._ep_t > self.cfg.t_start)
         self.prog = (1.0 - dist / self.start_dist).clamp(-1.0, 1.0)
-        timeout = (self.episode_length_buf >= self.max_episode_length - 1) | self.success
-        return fell, timeout & ~fell
+        self.fell = fell
+        done = fell | self.success                 # the goal ends the task (terminated); only the time limit is a truncation
+        return done, (self.episode_length_buf >= self.max_episode_length - 1) & ~done
 
     def _get_rewards(self):
         cfg, dt, x0 = self.cfg, self.step_dt, self.x0
@@ -135,8 +136,8 @@ class GeneralTask(SpotTask):
             "orient": -cfg.w_orient * orient * dt,
             "action_rate": -cfg.w_action_rate * ((self.actions - self.prev_actions) ** 2).sum(1) * dt,
             "alive": cfg.w_alive * trot * dt,
-            "timeout": -cfg.w_timeout * (self.reset_time_outs & ~self.success).float(),
-            "fall": -cfg.w_fall * self.reset_terminated.float(),
+            "timeout": -cfg.w_timeout * self.reset_time_outs.float(),
+            "fall": -cfg.w_fall * self.fell.float(),
             "success": cfg.w_success * self.success.float(),
         }
         for k, v in terms.items():
@@ -157,7 +158,7 @@ class GeneralTask(SpotTask):
         ran = self.has_run[env_ids]
         if cfg.curriculum and not self.eval_mode and bool(ran.any()):
             up = self.success[env_ids] & ran
-            down = (self.reset_terminated[env_ids] | (self.prog[env_ids] < cfg.progress_for_move_down)) & ~up & ran
+            down = (self.fell[env_ids] | (self.prog[env_ids] < cfg.progress_for_move_down)) & ~up & ran
             imp.update_env_origins(env_ids, up, down)
         o = imp.env_origins[env_ids]
         fixed = self.eval_mode or self.fixed_command

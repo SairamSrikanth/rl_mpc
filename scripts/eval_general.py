@@ -1,4 +1,4 @@
-import argparse, functools, os, re, sys
+import argparse, functools, os, sys
 from pathlib import Path
 from isaaclab.app import AppLauncher
 
@@ -61,15 +61,16 @@ def main():
         with torch.inference_mode():
             act = zero if policy is None else policy(obs)
             obs, _, term, trunc, _ = e.step(act)
-        t = k * e.step_dt
         ended = (term | trunc) & ~seen
         for i in torch.nonzero(ended).flatten().tolist():
             key = (fams[int(types[i])], band_of[i])
             r = res[key]
             r[0] += 1
-            r[2] += int(term[i])
-            r[1] += int(bool(trunc[i]) and not bool(term[i]) and t < args.t - 0.5)       # an early time-out is the success exit
-            outcome[i] = "F" if bool(term[i]) else ("G" if bool(trunc[i]) and t < args.t - 0.5 else "T")
+            fell = bool(e.fell[i])                       # the reset that follows clears e.success but not e.fell
+            goal = bool(term[i]) and not fell            # terminated without falling = reached the goal
+            r[2] += int(fell)
+            r[1] += int(goal)
+            outcome[i] = "F" if fell else ("G" if goal else "T")
             seen[i] = True
     name = "policy " + Path(args.checkpoint).parent.name + "/" + Path(args.checkpoint).name if args.checkpoint else "zero residual (pure MPC)"
     print(f"[gen] {name}; terrain seed {args.seed}; randomisation {'ON' if args.dr else 'off'}; {B} robots, one episode each (still walking at {args.t:.0f} s: {int((~seen).sum())})")
@@ -85,7 +86,7 @@ def main():
             cells.append(f"{s:3d} / {fl:3d} / {n:3d}".rjust(18))
         print(f"[gen] {f:18s} " + "  ".join(cells))
     print(f"[gen] {'ALL':18s} " + "  ".join(f"{tot[b][1]:3d} / {tot[b][2]:3d} / {tot[b][0]:3d}".rjust(18) for b in range(len(bands))))
-    print(f"[gen] goal rate by band: " + "  ".join(f"{b}: {100 * tot[i][1] / max(1, tot[i][0]):.0f}%" for i, b in enumerate(blabels)))
+    print("[gen] goal rate by band: " + "  ".join(f"{b}: {100 * tot[i][1] / max(1, tot[i][0]):.0f}%" for i, b in enumerate(blabels)))
     if args.per_env:
         print("[gen] per-robot:", "".join(outcome))
     sys.stdout.flush()

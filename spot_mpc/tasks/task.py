@@ -46,7 +46,7 @@ class SpotTaskCfg(SpotMpcEnvCfg):
     step_thresh: float = 0.10        # height jump between scan samples that counts as a riser
     w_alive: float = 0.0             # (0.2 let the policy stall: survive 45 s slowly instead of finishing)
     w_fall: float = 10.0
-    w_timeout: float = 10.0          # timing out without reaching the goal is a failure too
+    w_timeout: float = 0.0           # a time limit is a truncation (bootstrapped by PPO), so it carries no penalty; a penalty would also need the time left in the observation
     w_success: float = 20.0
     track_sigma2: float = 0.04       # (0.25 paid ~45% of the tracking reward for standing still)
 
@@ -67,6 +67,7 @@ class SpotTask(SpotMpcEnv):
         self.actions = torch.zeros(B, cfg.action_space, device=dev)
         self._foot_ids = self._contact.find_bodies([f"{l}_foot" for l in ("fl", "fr", "hl", "hr")], preserve_order=True)[0]
         self.success = torch.zeros(B, dtype=torch.bool, device=dev)
+        self.fell = torch.zeros(B, dtype=torch.bool, device=dev)
         self.n_nonfinite = 0
         self.phi_prev = torch.zeros(B, device=dev)
         self.spawn_z = torch.zeros(B, device=dev)
@@ -143,8 +144,10 @@ class SpotTask(SpotMpcEnv):
         self.n_nonfinite = self.n_nonfinite + int(self.state_nonfinite.sum())
         # eval scripts spawn anywhere and keep their own success logic
         self.success = (torch.zeros_like(fell) if self.fixed_spawn else self._is_success(x0) & ~fell & (self._ep_t > self.cfg.t_start))
-        timeout = (self.episode_length_buf >= self.max_episode_length - 1) | self.success
-        return fell, timeout & ~fell
+        self.fell = fell
+        # reaching the goal ends the task (terminated, no bootstrap); only running out of time is a truncation
+        done = fell | self.success
+        return done, (self.episode_length_buf >= self.max_episode_length - 1) & ~done
 
     def _get_rewards(self):
         cfg, dt = self.cfg, self.step_dt
@@ -154,7 +157,7 @@ class SpotTask(SpotMpcEnv):
         trot = (self._ep_t >= cfg.t_start).float()
         track = torch.exp(-((v_b[:, :2] - self.cmd[:, :2]) ** 2).sum(1) / cfg.track_sigma2)
         orient = x0[:, 0] ** 2 + (x0[:, 1] - self.pitch_ref) ** 2
-        fell = self.reset_terminated
+        fell = self.fell
         steep = self._steep + self._steep_down                               # previewed slope steepness 0..2
         link = (self.link_contact() / cfg.link_ref).clamp(0.0, cfg.link_cap)
         slope_track = torch.exp(-((v_b[:, 0] - self.cmd[:, 0]) ** 2) / 0.01)
@@ -174,7 +177,7 @@ class SpotTask(SpotMpcEnv):
             "orient": -cfg.w_orient * orient * dt,
             "action_rate": -cfg.w_action_rate * ((self.actions - self.prev_actions) ** 2).sum(1) * dt,
             "alive": cfg.w_alive * trot * dt,
-            "timeout": -cfg.w_timeout * (self.reset_time_outs & ~self.success).float(),
+            "timeout": -cfg.w_timeout * self.reset_time_outs.float(),
             "fall": -cfg.w_fall * fell.float(),
             "success": cfg.w_success * self.success.float(),
         }
@@ -186,7 +189,7 @@ class SpotTask(SpotMpcEnv):
             env_ids = self._robot._ALL_INDICES
         if hasattr(self, "lane") and len(env_ids) > 0:
             log = {f"Episode_Reward/{k}": v[env_ids].mean() / self.max_episode_length_s for k, v in self._ep_sums.items()}
-            log["Episode/fall_rate"] = self.reset_terminated[env_ids].float().mean()
+            log["Episode/fall_rate"] = self.fell[env_ids].float().mean()
             log["Episode/success_rate"] = self.success[env_ids].float().mean()
             log["Episode/nonfinite_resets_total"] = torch.tensor(float(self.n_nonfinite), device=self.device)
             for i, nm in enumerate(("stairs", "ramp", "rubble", "flat", "descent", "ramp_down")):
