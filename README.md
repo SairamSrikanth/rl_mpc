@@ -147,17 +147,21 @@ The acceleration residual enters the model as a disturbance $d_k(\hat a)$: $x_{k
 
 ### Training
 
-- **Algorithm:** PPO ([rsl-rl](https://github.com/leggedrobotics/rsl_rl)) with clipped objective $L=\mathbb E\big[\min\big(r_t\hat A_t,\ \mathrm{clip}(r_t,1\pm\epsilon)\hat A_t\big)\big]$, $\epsilon=0.1$, GAE ($\gamma=0.99$, $\lambda=0.95$), fixed learning rate $3\cdot10^{-5}$, actor and critic MLPs of $[512,256,128]$, 256 parallel robots, 24 steps per environment per update, up to 1500 iterations.
+- **Algorithm:** PPO ([rsl-rl](https://github.com/leggedrobotics/rsl_rl)) with clipped objective $L=\mathbb E\big[\min\big(r_t\hat A_t,\ \mathrm{clip}(r_t,1\pm\epsilon)\hat A_t\big)\big]$, $\epsilon=0.1$, GAE ($\gamma=0.99$, $\lambda=0.95$), learning rate either fixed at $3\cdot10^{-5}$ or KL-adaptive (target KL 0.01, starting at $10^{-4}$, $\epsilon=0.2$), actor and critic MLPs of $[512,256,128]$, 256 parallel robots, 24 steps per environment per update, up to 1500 iterations.
 - **Exploration:** a small initial action noise ($\sigma_0=0.08$), because stair success is knife-edge in the controller and a noise level of 0.3 halved it.
 - **Observation:** body velocity and angular velocity in the body frame, gravity direction, command, joint positions and velocities, gait phase and contact schedule, measured foot loads, previous action, the previewed pitch and steepness, and a terrain scan. The critic additionally sees contact forces, the MPC's commanded forces and the true height above the floor.
-- **Reward (dense, shaped):** progress (forward distance plus $3\times$ height gained), velocity tracking $\exp(-\|v-v^\text{cmd}\|^2/\sigma^2)$, an orientation penalty on $\phi^2+(\theta-\theta^\text{ref})^2$, an action-rate penalty, a penalty for legs or body touching terrain, an overspeed penalty on descents, tracking of the vertical speed the slope asks for, and terminal terms (fall −10, timeout −10, success +20). The general task adds **Lagrangian safety costs** (unloaded stance, a tilt barrier with a control-barrier-function condition, overspeed, link contact) whose multipliers grow while a running cost exceeds its budget.
+- **Reward (dense, shaped):** progress (forward distance plus $3\times$ height gained), velocity tracking $\exp(-\|v-v^\text{cmd}\|^2/\sigma^2)$, an orientation penalty on $\phi^2+(\theta-\theta^\text{ref})^2$, an action-rate penalty, a penalty for legs or body touching terrain, an overspeed penalty on descents, tracking of the vertical speed the slope asks for, and terminal terms (fall −10, success +20). Reaching the goal **terminates** the episode, so PPO does not bootstrap a value past it; running out of time is a **truncation**, which PPO bootstraps and which carries no penalty (a penalty would also need the time left in the observation, which the policy does not see). The general task adds **Lagrangian safety costs** (unloaded stance, a tilt barrier with a control-barrier-function condition, overspeed, link contact) whose multipliers grow while a running cost exceeds its budget.
+- **Logging and provenance:** every iteration logs the KL step of the policy, its mean action size and the action noise; every checkpoint stores the environment and PPO configuration (including the CMA-ES operating points it was trained against), the git commit and any uncommitted code diff.
 - **Tasks:** `lanes` (hand-made test-world lanes) and `general` (procedural terrain, ten tile families on a difficulty curriculum, with domain randomisation of friction 0.45–1.25, added mass −2 to +4 kg, motor strength ±10%, random pushes and 1 cm sensor noise).
 
 ```bash
 python scripts/train.py --task general --num_envs 256 --headless
+# with the KL-adaptive learning rate
+python scripts/train.py --task general --num_envs 256 --headless \
+    --agent_set "algorithm.schedule='adaptive'" --agent_set "algorithm.learning_rate=1e-4" --agent_set "algorithm.clip_param=0.2"
 ```
 
-Six PPO residual runs were made, including Lagrangian safety costs, a tilt shield and a stair-focused fine-tune. The result is in [section 5](#5-results): **no net gain**. `results/best.pt` is the best checkpoint of those runs, kept for reproducibility.
+Eight PPO residual runs were made. The first six (Lagrangian safety costs, a tilt shield, a stair-focused fine-tune) reported reaching the goal as a time-out, which PPO bootstraps as if the episode carried on, and also penalised the real time-out while bootstrapping it. The last two were retrained after fixing that, one with the fixed and one with the KL-adaptive learning rate, against the current (CMA-ES) controller. The result is in [section 5](#5-results): **no net gain in either case**. Two checkpoints are kept for reproducibility: `results/best.pt` (the best of the first six, trained before the CMA-ES operating points existed and without a record of its configuration) and `results/best_adaptive_lr.pt` (the adaptive-rate retrain, iteration 1000, picked on a separate terrain seed; its configuration is stored inside it).
 
 ---
 
@@ -261,16 +265,28 @@ Goal rate by difficulty band:
 | + backward descent | 87% | 71% | 56% |
 | + CMA-ES operating points | 90% | 79% | 66% |
 
-The CMA-ES points improved every band, most on the hardest. The gain is concentrated in descents and up-down stairs; ramps are unchanged within noise.
+These three rows were measured together on 2026-10-07 (terrain seed 12345). The controller has changed since in ways that touch generated terrain, and the current code gives 84 / 80 / 62% for the last row on the same seed (87 / 78 / 68% on seed 777), so compare rows within this table, not with the one below. The CMA-ES points improved every band, most on the hardest. The gain is concentrated in descents and up-down stairs; ramps are unchanged within noise.
 
 ### RL residual versus zero residual
 
-| | easy | mid | hard |
-|---|---|---|---|
-| zero residual (pure MPC) | 91% | 85% | 67% |
-| PPO residual, `results/best.pt` | 85% | 82% | 63% |
+Current code, held-out generated terrain (256 robots per seed, domain randomisation on, one episode each), goal rate by band (easy / mid / hard). Every policy is compared with the zero residual robot by robot on the same tiles, starts and randomisation; *net* is robots only the policy brought to the goal minus robots only the zero residual did, over both seeds, with an exact McNemar test.
 
-(A separate evaluation run, so not directly comparable to the table above.) On the warehouse stairs-down test the zero residual reaches 55% and a stair-focused residual 41%. The same pattern held across all six PPO runs: **the residual never beat the zero action**.
+| | seed 12345 | seed 777 | goals (of 512) | net vs zero, *p* |
+|---|---|---|---|---|
+| zero residual (pure MPC) | 84 / 80 / 62% | 87 / 78 / 68% | 390 | |
+| `results/best.pt` (first six runs) | 85 / 80 / 59% | 83 / 82 / 68% | 388 | −2, *p* = 0.92 |
+| retrained, fixed learning rate (iteration 1499) | 85 / 82 / 62% | 80 / 81 / 67% | 388 | −2, *p* = 0.92 |
+| retrained, adaptive learning rate, `results/best_adaptive_lr.pt` (iteration 1000) | 85 / 80 / 54% | 84 / 81 / 67% | 380 | −10, *p* = 0.35 |
+
+Warehouse stairs (dense scene, 64 robots on each of seeds 1 and 2, summed):
+
+| | stairs up | backward descent |
+|---|---|---|
+| zero residual | 122 / 128 | 115 / 128 |
+| retrained, fixed learning rate | 126 / 128 | 116 / 128 |
+| retrained, adaptive learning rate | 123 / 128 | 112 / 128 |
+
+None of the differences is significant. The retrained checkpoints were picked as the best of three (iterations 500, 1000, 1499) on a third terrain seed, 2024, where they led the zero residual by 16 and 20 goals of 255; that lead did not hold on the held-out seeds, which is what picking the best of a few noisy scores does. Individual outcomes are chaotic: even `best.pt`, whose actions are tiny, changes the result for about 100 of 512 robots, half each way. Across all eight PPO runs, **the residual never beat the zero action**.
 
 ### Why we think RL did not help here
 
@@ -278,6 +294,7 @@ This is our reading of the measurements, not a proven cause:
 
 - The outcome is already a knife-edge, chaotic function of small perturbations (section 4). A policy that perturbs the controller on every tick adds exactly that kind of noise, and the tolerable noise is tiny (0.3 action noise halved stair success).
 - The training reward is a dense proxy (progress, tracking, tilt) for a sparse event (finishing the staircase). The policy can improve the proxy without improving the event.
+- The retrain rules out the episode-end handling as the cause: with goal-reaching as a termination, an honest time limit, a measured KL step and an adaptive learning rate, the result did not change. The policies did move further from the MPC (mean action about 0.05–0.08 against 0.04 for `best.pt`), so it is not a policy stuck at its starting point either.
 - CMA-ES optimises the event itself, with the controller's own structure (the friction and torque constraints, the clock gait) left intact.
 
 None of this says RL residuals cannot work; it says that for this controller, this benchmark and these reward designs, offline parameter search was the better use of the same simulator.
@@ -290,7 +307,7 @@ None of this says RL residuals cannot work; it says that for this controller, th
 - **One tuning geometry.** The CMA-ES points were tuned on one staircase (rise 0.1875 m, run 0.30 m). Generalisation to other geometries is partial: the hard held-out band is still only 66%.
 - **Unsolved terrain.** Curbs (about 0–2 of 19 held-out tiles) and irregular stairs remain unsolved.
 - **Chaotic outcomes.** Stair success depends on small perturbations of the initial state, so a result from a few robots means little. Compare configurations with 64 or more robots and two seeds, and never trust 16.
-- **Narrow RL evidence.** Six PPO runs with one residual parametrisation and a few reward designs. A different action space, a learned scheduler of the operating points, or training against the success event directly were not tried.
+- **Narrow RL evidence.** Eight PPO runs with one residual parametrisation and a few reward designs, two of them after fixing the episode-end handling. A different action space, a learned scheduler of the operating points, or training against the success event directly were not tried.
 - **Descent is the weak point.** Descent falls are forward-pitch flips driven by feet the clock schedules in stance but that are not yet loaded; ascent falls are roll flips mid-staircase.
 - **Benchmark tuning.** Because the search scored candidates on the same building's staircase, the loop numbers are in-sample for the geometry. The held-out generated terrain is the out-of-sample check.
 
@@ -315,6 +332,7 @@ python scripts/run_warehouse.py --segment loop_back --num_envs 32 --seed 11 --he
 
 # the same 25-waypoint loop with the PPO residual policy instead of the pure MPC
 python scripts/run_warehouse.py --segment loop_back --num_envs 32 --seed 11 --checkpoint results/best.pt --headless
+python scripts/run_warehouse.py --segment loop_back --num_envs 32 --seed 11 --checkpoint results/best_adaptive_lr.pt --headless
 
 # (the warehouse is the full scene by default: racks, pallets, box piles, barrels and forklifts, dressed with
 #  the real models and guard rails whenever there is a window or a video; --empty gives the bare building)
@@ -325,7 +343,7 @@ python scripts/run_warehouse.py --segment stairs_up --num_envs 1 --video outputs
 # look at the building in a window (run without --headless)
 python scripts/render_scene.py --gui
 
-# held-out generated terrain; add --checkpoint results/best.pt for the PPO residual
+# held-out generated terrain; add --checkpoint results/best.pt (or best_adaptive_lr.pt) for a PPO residual, --per_env for paired comparisons
 python scripts/eval_general.py --headless
 
 # drive Spot yourself with the keyboard (opens the viewer; click it first)
@@ -359,7 +377,7 @@ spot_mpc/
   teleop.py       keyboard keys -> velocity command
 scripts/        run.py · run_warehouse.py · teleop.py · eval_general.py · train.py · tune_cma.py · render_scene.py · check_route.py
 tests/          simulator-free unit tests
-results/        cma/*.json (the two CMA-ES searches) · best.pt (the PPO checkpoint kept)
+results/        cma/*.json (the two CMA-ES searches) · best.pt (best of the first six PPO runs) · best_adaptive_lr.pt (adaptive-rate retrain)
 ```
 
 Scripts import `spot_mpc` only after the Isaac app has launched (`AppLauncher`), so the package `__init__` files are empty on purpose.
