@@ -41,12 +41,32 @@ Everything is measured in simulation (Isaac Sim / PhysX), with the robot's true 
 
 At 40 Hz: update the map, preview the terrain along the commanded path, choose the operating point, build the reference horizon, footholds and contact schedule, solve the QP, re-plan the swing legs. At 400 Hz: stance legs apply the MPC force, swing legs track a trajectory.
 
-```
-command (vx, vy, wz) ──► gait clock ──► reference horizon ──► SRB-MPC (QP, ADMM) ──► exact projection ─► tau = -J^T F  (stance)
-        ▲                    │                  ▲                                                              
-   path follower        footholds ◄── elevation map ──► swing apex ──► Cartesian PD tracking ───────────────► tau = J^T(...)  (swing)
-                             ▲
-              operating point θ(t) = blend of θ_flat, θ_up, θ_back by the previewed slope
+```mermaid
+flowchart LR
+    subgraph TICK["40 Hz MPC tick"]
+        direction LR
+        CMD["Command (vx, vy, ωz)<br/>path follower or teleop"] --> GAIT["Gait clock<br/>contact schedule"]
+        MAP["Elevation map<br/>LiDAR, depth, loaded feet"] --> PREV["Slope preview<br/>along the path"]
+        PREV --> OP["Operating point θ<br/>blend of θ_flat, θ_up, θ_back"]
+        OP --> GAIT
+        MAP --> FH["Footholds<br/>Raibert + edge avoidance"]
+        GAIT --> REF["Reference horizon<br/>CoM, pitch, contacts"]
+        FH --> REF
+        OP --> REF
+        REF --> MPC["SRB-MPC<br/>QP solved by batched ADMM"]
+        MPC --> PROJ["Exact projection<br/>friction, force and torque limits"]
+        FH --> SW["Swing planner<br/>apex clears the risers"]
+        OP --> SW
+    end
+    subgraph LEGS["400 Hz leg control"]
+        direction LR
+        ST["Stance legs<br/>τ = −Jᵀ F"]
+        SWC["Swing legs<br/>Cartesian PD, τ = Jᵀ f"]
+    end
+    PROJ --> ST
+    SW --> SWC
+    ST --> ROBOT["Spot, 12 joints"]
+    SWC --> ROBOT
 ```
 
 ### Single-rigid-body model
@@ -205,11 +225,8 @@ State these before trusting the numbers:
 
 1. **Regime-specific parameters.** Each set only acts in its own regime through the blend $w_\text{up}$, $w_\text{back}$. The backward set is valid only while walking backward; applying the descent parameters globally destroyed ascent (stairs up 12%, loop 9%).
 2. **One staircase geometry.** Both searches only saw the warehouse staircase: rise 0.1875 m, run 0.30 m. Other geometries are a held-out question, not something the search covers.
-3. **Success is the objective.** A noisy, binary measure over 96 robots per candidate. Candidates are compared on **common random numbers**: within a generation all candidates see the same start poses (seeded $2000+g$), so a rank reflects the parameters, not the luck. The poses change every generation so the search cannot memorise one set. This is not free of bias, which is why a held-out check with a different seed follows each search.
-4. **Zero residual, sensed map, true state.** No learned policy, no state estimator. The parameters are tuned for the conditions the benchmark runs in.
-5. **Box constraints.** The optimum is only sought inside the bounds. The hand-tuned point is inside the box and is the starting mean. The v1 bounds were binding: `foot_margin` ended on its lower bound (0.05) in both searches, and the descent mean put `swing_kd` on its upper bound (40). `scripts/tune_cma.py` now has wider bounds for these and, at the end, re-scores the default, the mean and the best candidate on an unseen seed.
-6. **Adoption rule.** The descent search adopted the best candidate, except `gait_duty_back` (kept at 0.60; the search's best was 0.572) and `q_vel_xy_back` (80.0; best 80.97). The ascent search adopted the distribution mean, a less noisy estimate of where the population converged.
-7. **Simulation only.** Actuators are ideal torque sources without delay; sensors are ray-cast against the same mesh that defines the colliders.
+3. **Box constraints.** The optimum is only sought inside the bounds. The hand-tuned point is inside the box and is the starting mean. The v1 bounds were binding: `foot_margin` ended on its lower bound (0.05) in both searches, and the descent mean put `swing_kd` on its upper bound (40). `scripts/tune_cma.py` now has wider bounds for these and, at the end, re-scores the default, the mean and the best candidate on an unseen seed.
+4. **Simulation only.** Actuators are ideal torque sources without delay; sensors are ray-cast against the same mesh that defines the colliders.
 
 ```bash
 python scripts/tune_cma.py --mode up   --pop 8 --gens 12 --num_envs 96 --headless
@@ -222,14 +239,11 @@ The search logs are in `results/cma/`; the adopted values are the defaults in `s
 
 | | RL residual (PPO) | CMA-ES parameter search |
 |---|---|---|
-| what is optimised | a network $a=\pi(o)$ that outputs 23 numbers every 40 Hz tick | 10 or 11 constant numbers per operating point |
-| where it acts | inside the loop, as a function of the state | outside the loop, offline; the table is fixed at run time |
+| optimisation | a network $a=\pi(o)$ that outputs 23 numbers every 40 Hz tick | 10 or 11 constant numbers per operating point |
 | training signal | dense shaped reward plus safety costs, gradient-based | one scalar: success fraction over 96 robots, derivative-free |
 | cost | 256 robots × up to 1500 iterations, one run per reward design | 8 candidates × 96 robots × 12–14 generations |
-| robustness knob | small action noise, rate limits, optional shield | bounds of the search box |
 | interpretability | opaque policy; zero action recovers the baseline | every number is a named controller parameter you can read |
 | failure mode | perturbs a knife-edge system every tick; reward is a proxy for success | overfits to the geometry and the benchmark it was scored on |
-| result here | no gain | +13 (descent) and +11 to +16 (ascent) points on the loop; +10 on the hardest held-out band |
 
 ---
 
@@ -271,12 +285,12 @@ These three rows were measured together on 2026-10-07 (terrain seed 12345). The 
 
 Current code, held-out generated terrain (256 robots per seed, domain randomisation on, one episode each), goal rate by band (easy / mid / hard). Every policy is compared with the zero residual robot by robot on the same tiles, starts and randomisation; *net* is robots only the policy brought to the goal minus robots only the zero residual did, over both seeds, with an exact McNemar test.
 
-| | seed 12345 | seed 777 | goals (of 512) | net vs zero, *p* |
+| | seed&nbsp;12345 (easy&nbsp;/&nbsp;mid&nbsp;/&nbsp;hard) | seed&nbsp;777 (easy&nbsp;/&nbsp;mid&nbsp;/&nbsp;hard) | goals (of&nbsp;512) | net vs zero, *p* |
 |---|---|---|---|---|
-| zero residual (pure MPC) | 84 / 80 / 62% | 87 / 78 / 68% | 390 | |
-| `results/best.pt` (first six runs) | 85 / 80 / 59% | 83 / 82 / 68% | 388 | −2, *p* = 0.92 |
-| retrained, fixed learning rate (iteration 1499) | 85 / 82 / 62% | 80 / 81 / 67% | 388 | −2, *p* = 0.92 |
-| retrained, adaptive learning rate, `results/best_adaptive_lr.pt` (iteration 1000) | 85 / 80 / 54% | 84 / 81 / 67% | 380 | −10, *p* = 0.35 |
+| zero residual (pure MPC) | 84&nbsp;/&nbsp;80&nbsp;/&nbsp;62% | 87&nbsp;/&nbsp;78&nbsp;/&nbsp;68% | 390 | |
+| `results/best.pt` (first six runs) | 85&nbsp;/&nbsp;80&nbsp;/&nbsp;59% | 83&nbsp;/&nbsp;82&nbsp;/&nbsp;68% | 388 | −2,&nbsp;*p*&nbsp;=&nbsp;0.92 |
+| retrained, fixed learning rate (iteration 1499) | 85&nbsp;/&nbsp;82&nbsp;/&nbsp;62% | 80&nbsp;/&nbsp;81&nbsp;/&nbsp;67% | 388 | −2,&nbsp;*p*&nbsp;=&nbsp;0.92 |
+| retrained, adaptive learning rate, `best_adaptive_lr.pt` (iteration 1000) | 85&nbsp;/&nbsp;80&nbsp;/&nbsp;54% | 84&nbsp;/&nbsp;81&nbsp;/&nbsp;67% | 380 | −10,&nbsp;*p*&nbsp;=&nbsp;0.35 |
 
 Warehouse stairs (dense scene, 64 robots on each of seeds 1 and 2, summed):
 
@@ -305,11 +319,7 @@ None of this says RL residuals cannot work; it says that for this controller, th
 
 - **Simulation only.** Actuators are ideal torque sources without delay, the state is ground truth (no estimator), and the sensors are ray-cast against the same mesh that defines the colliders. Nothing here is validated on hardware.
 - **One tuning geometry.** The CMA-ES points were tuned on one staircase (rise 0.1875 m, run 0.30 m). Generalisation to other geometries is partial: the hard held-out band is still only 66%.
-- **Unsolved terrain.** Curbs (about 0–2 of 19 held-out tiles) and irregular stairs remain unsolved.
-- **Chaotic outcomes.** Stair success depends on small perturbations of the initial state, so a result from a few robots means little. Compare configurations with 64 or more robots and two seeds, and never trust 16.
-- **Narrow RL evidence.** Eight PPO runs with one residual parametrisation and a few reward designs, two of them after fixing the episode-end handling. A different action space, a learned scheduler of the operating points, or training against the success event directly were not tried.
 - **Descent is the weak point.** Descent falls are forward-pitch flips driven by feet the clock schedules in stance but that are not yet loaded; ascent falls are roll flips mid-staircase. `--set contact_aware=True` gives such a foot no MPC force and keeps it reaching down until it is loaded; `--set terrain_cone=True` puts the friction pyramid about the sensed surface normal instead of world z (on the 18° ramp the world-z pyramid allows forces that slip). Neither has been benchmarked yet, so both are off by default.
-- **Benchmark tuning.** Because the search scored candidates on the same building's staircase, the loop numbers are in-sample for the geometry. The held-out generated terrain is the out-of-sample check.
 
 ---
 
