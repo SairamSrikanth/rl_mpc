@@ -207,8 +207,8 @@ State these before trusting the numbers:
 2. **One staircase geometry.** Both searches only saw the warehouse staircase: rise 0.1875 m, run 0.30 m. Other geometries are a held-out question, not something the search covers.
 3. **Success is the objective.** A noisy, binary measure over 96 robots per candidate. Candidates are compared on **common random numbers**: within a generation all candidates see the same start poses (seeded $2000+g$), so a rank reflects the parameters, not the luck. The poses change every generation so the search cannot memorise one set. This is not free of bias, which is why a held-out check with a different seed follows each search.
 4. **Zero residual, sensed map, true state.** No learned policy, no state estimator. The parameters are tuned for the conditions the benchmark runs in.
-5. **Box constraints.** The optimum is only sought inside the bounds. The hand-tuned point is inside the box and is the starting mean.
-6. **Adoption rule.** The descent search adopted the best candidate; the ascent search adopted the distribution mean, a less noisy estimate of where the population converged.
+5. **Box constraints.** The optimum is only sought inside the bounds. The hand-tuned point is inside the box and is the starting mean. The v1 bounds were binding: `foot_margin` ended on its lower bound (0.05) in both searches, and the descent mean put `swing_kd` on its upper bound (40). `scripts/tune_cma.py` now has wider bounds for these and, at the end, re-scores the default, the mean and the best candidate on an unseen seed.
+6. **Adoption rule.** The descent search adopted the best candidate, except `gait_duty_back` (kept at 0.60; the search's best was 0.572) and `q_vel_xy_back` (80.0; best 80.97). The ascent search adopted the distribution mean, a less noisy estimate of where the population converged.
 7. **Simulation only.** Actuators are ideal torque sources without delay; sensors are ray-cast against the same mesh that defines the colliders.
 
 ```bash
@@ -216,7 +216,7 @@ python scripts/tune_cma.py --mode up   --pop 8 --gens 12 --num_envs 96 --headles
 python scripts/tune_cma.py --mode down --pop 8 --gens 14 --num_envs 96 --headless
 ```
 
-The search logs are in `results/cma/`; the adopted values are the defaults in `spot_mpc/env/cfg.py`.
+The search logs are in `results/cma/`; the adopted values are the defaults in `spot_mpc/env/cfg.py`. `descent_back_v1.json` comes from an earlier version of the script that searched the global parameters (`gait_freq`, `swing_kp`, `foot_margin`, `stair_speed_down`, ...) while scoring only the descent; the values were then copied into the `*_back` fields. The current script searches the `*_back` fields directly and starts from the hand-tuned values, so a re-run will not reproduce that log exactly.
 
 ### How the two approaches differ
 
@@ -246,7 +246,7 @@ All numbers: pure MPC unless stated, sensed elevation map, true state, 0.45 m/s 
 | + CMA-ES descent point | 75% |
 | + CMA-ES ascent point | **86–91%** (55/64, 55/64 and 29/32 on three seeds) |
 
-The remaining falls (8–9 of 64) are on the staircases, mostly the descent.
+The remaining falls (8–9 of 64) are on the staircases, mostly the descent. These loop numbers may predate the stair and ramp rails becoming colliders and the dense scene becoming the default (both arrived in commit `a6741de`, together with these tables); re-run them on the current defaults before comparing with new results.
 
 ### Single-staircase held-out checks (128 robots, a different seed)
 
@@ -308,14 +308,14 @@ None of this says RL residuals cannot work; it says that for this controller, th
 - **Unsolved terrain.** Curbs (about 0–2 of 19 held-out tiles) and irregular stairs remain unsolved.
 - **Chaotic outcomes.** Stair success depends on small perturbations of the initial state, so a result from a few robots means little. Compare configurations with 64 or more robots and two seeds, and never trust 16.
 - **Narrow RL evidence.** Eight PPO runs with one residual parametrisation and a few reward designs, two of them after fixing the episode-end handling. A different action space, a learned scheduler of the operating points, or training against the success event directly were not tried.
-- **Descent is the weak point.** Descent falls are forward-pitch flips driven by feet the clock schedules in stance but that are not yet loaded; ascent falls are roll flips mid-staircase.
+- **Descent is the weak point.** Descent falls are forward-pitch flips driven by feet the clock schedules in stance but that are not yet loaded; ascent falls are roll flips mid-staircase. `--set contact_aware=True` gives such a foot no MPC force and keeps it reaching down until it is loaded; `--set terrain_cone=True` puts the friction pyramid about the sensed surface normal instead of world z (on the 18° ramp the world-z pyramid allows forces that slip). Neither has been benchmarked yet, so both are off by default.
 - **Benchmark tuning.** Because the search scored candidates on the same building's staircase, the loop numbers are in-sample for the geometry. The held-out generated terrain is the out-of-sample check.
 
 ---
 
 ## Getting started
 
-**Requirements:** [Isaac Lab](https://isaac-sim.github.io/IsaacLab/) with Isaac Sim 5.1 and a CUDA GPU (the scripts import `isaaclab` and use its Spot asset, so run them with the Python environment where it is installed); `pycma` (`pip install cma`) for the search; `rsl-rl` through `isaaclab_rl` for PPO; `imageio` with ffmpeg for `--video`. The unit tests need only `torch` and `numpy`.
+**Requirements:** [Isaac Lab](https://isaac-sim.github.io/IsaacLab/) with Isaac Sim 5.1 and a CUDA GPU (the scripts import `isaaclab` and use its Spot asset, so run them with the Python environment where it is installed); `pycma` (`pip install cma`) for the search; `rsl-rl` through `isaaclab_rl` for PPO; `imageio` with ffmpeg for `--video`. The unit tests need `torch`, `numpy`, `trimesh` and `rtree`.
 
 <!-- TODO: exact install steps and the Isaac Lab commit/tag you tested against. -->
 

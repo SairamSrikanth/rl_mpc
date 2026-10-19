@@ -26,12 +26,17 @@ def swing_apex(p0, p_td, terrain, clearance=0.06, base_apex=0.08, delay=0.2, n=8
     d0 = _delay_like(p0, delay)[..., None]
     sh = ((s - d0) / (1.0 - d0)).clamp(0.0, 1.0)
     sig = 10 * sh**3 - 15 * sh**4 + 6 * sh**5
-    d = torch.where(p_td[..., 0] >= p0[..., 0], torch.ones_like(p0[..., 0]), -torch.ones_like(p0[..., 0]))
-    x = p0[..., 0:1] + (p_td[..., 0:1] - p0[..., 0:1]) * sig
-    y = p0[..., 1:2] + (p_td[..., 1:2] - p0[..., 1:2]) * sig
+    step = p_td[..., :2] - p0[..., :2]
+    n = step.norm(dim=-1, keepdim=True)
+    # toe look-ahead along the step; a step in place looks along +x
+    d = torch.where(n > 1e-6, step / n.clamp(min=1e-6), torch.tensor([1.0, 0.0], device=dev, dtype=dt))
+    x = p0[..., 0:1] + step[..., 0:1] * sig
+    y = p0[..., 1:2] + step[..., 1:2] * sig
     u6 = torch.linspace(0.0, 1.0, 6, device=dev, dtype=dt)
-    xs = x[..., None] - (d * behind)[..., None, None] + (d * (ahead + behind))[..., None, None] * u6
-    hs = getattr(terrain, "swing_height", terrain.height)(xs, y[..., None].expand_as(xs))
+    off = (ahead + behind) * u6 - behind
+    xs = x[..., None] + d[..., 0, None, None] * off
+    ys = y[..., None] + d[..., 1, None, None] * off
+    hs = getattr(terrain, "swing_height", terrain.height)(xs, ys)
     hmax, hmin = hs.amax(-1), hs.amin(-1)
     need_z = hmax + (clearance if isinstance(clearance, (int, float)) else clearance.reshape(-1, 1, 1)) + slack
     up = s <= 0.5

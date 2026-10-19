@@ -9,6 +9,7 @@ from isaaclab.envs import DirectRLEnv
 from isaaclab.sensors import ContactSensor, RayCaster, RayCasterCamera, RayCasterCameraCfg, RayCasterCfg, patterns
 
 from ..control import gait as gs
+from ..control.footholds import surface_normals
 from ..control.mpc import BatchedSrbdMpc, MpcParams
 from ..control.swing import SwingPlanner
 from ..control.torque_interface import GRAVITY, LEGS, SPOT_INERTIA_B, TAU_LIM, SpotLegs, apply_torque, joint_pd, roll_pitch_yaw
@@ -172,6 +173,11 @@ class SpotMpcEnv(DirectRLEnv):
         self._floor_last = h
         return h
 
+    def _late_feet(self, c_now):
+        """(B,4) feet the clock has put in stance that carry no load yet (only while trotting)."""
+        loaded = self._contact.data.net_forces_w[:, self._foot_ids].norm(dim=-1) > self.cfg.load_threshold
+        return c_now & ~loaded & self.gait.trotting[:, None]
+
     def link_contact(self):
         """Summed contact force [N] on every link except the feet (a leg or the body hitting the terrain)."""
         return self._contact.data.net_forces_w[:, self._link_ids].norm(dim=-1).sum(-1)
@@ -293,6 +299,8 @@ class SpotMpcEnv(DirectRLEnv):
         anchor = self.gov.update(self.xe, self.cmd)
         self.anchor = anchor
         x_ref, r, contact = gs.build_horizon(self.P, terrain, self.gait, self.xe, self.cmd, feet, anchor, self.h_ref, self.foot_res)
+        if cfg.contact_aware:           # no force on a foot that has not landed yet: the others carry the body this tick
+            contact = torch.cat([contact[:, :1] * (~self._late_feet(c_now))[:, None].to(contact.dtype), contact[:, 1:]], 1)
 
         # the previewed slope along the direction of travel picks the operating point for the next tick
         backward = (self.cmd[:, 0] < -0.02)
@@ -306,7 +314,7 @@ class SpotMpcEnv(DirectRLEnv):
         self._duty_blend = self._duty_blend + min(1.0, self.step_dt / cfg.duty_tau) * (down - self._duty_blend)
         duty_down = torch.where(backward, torch.full_like(down, cfg.gait_duty_back), torch.full_like(down, cfg.gait_duty_down))
         duty = cfg.gait_duty + (duty_down - cfg.gait_duty) * self._duty_blend + self._wup * (cfg.gait_duty_up - cfg.gait_duty) + cfg.meta_duty * meta[:, 2]
-        self.gait.trot_duty = duty.clamp(0.5, 0.8)
+        self.gait.set_duty(duty.clamp(0.5, 0.8))
 
         q_diag = torch.as_tensor(self.mpc_params.q_diag, device=self.device, dtype=torch.float32).repeat(self.num_envs, 1)
         q_down = torch.where(backward, torch.full_like(down, cfg.q_vel_xy_back), torch.full_like(down, cfg.q_vel_xy_down))
@@ -318,7 +326,8 @@ class SpotMpcEnv(DirectRLEnv):
 
         jac = self.legs.leg_jacobians()
         f0, info = self.mpc.solve(self.xe, x_ref, r, contact, u_prev=self.u_prev, torque_map=-jac.transpose(-1, -2), tau_lim=self.tau_lim,
-                                  q_diag=q_diag, accel_resid=self.accel_resid)
+                                  q_diag=q_diag, accel_resid=self.accel_resid,
+                                  normals=surface_normals(terrain.height, feet[..., 0], feet[..., 1]) if cfg.terrain_cone else None)
         self.F_cmd, self.u_prev = f0, f0.reshape(self.num_envs, 12)
         self.f_raw, self.mpc_resid = info["x"][:, :12].reshape(-1, 4, 3), info["resid"]
         self.pitch_ref = x_ref[:, 0, 1]
@@ -336,10 +345,17 @@ class SpotMpcEnv(DirectRLEnv):
         wu, wb = self._wup, self._wback
         kp = blend(cfg.swing_kp, wu, cfg.swing_kp_up, wb, cfg.swing_kp_back)[:, None, None]
         kd = blend(cfg.swing_kd, wu, cfg.swing_kd_up, wb, cfg.swing_kd_back)[:, None, None]
+        stance = c_now
+        if cfg.contact_aware:           # a late foot keeps reaching down past its planned touchdown point instead of pushing on air
+            late = self._late_feet(c_now)
+            stance = c_now & ~late
+            probe = self.swing.p_td - torch.tensor([0.0, 0.0, cfg.touchdown_probe], device=self.device)
+            pos = torch.where(late[..., None], probe, pos)
+            vel = torch.where(late[..., None], torch.zeros_like(vel), vel)
         f_swing = kp * (pos - feet) + kd * (vel - vfoot)
         tau_stance = -torch.einsum("nfij,nfi->nfj", jac, self.F_cmd)
         tau_swing = torch.einsum("nfij,nfi->nfj", jac, f_swing)
-        tau_leg = torch.where(c_now[..., None], tau_stance, tau_swing).reshape(self.num_envs, 12)
+        tau_leg = torch.where(stance[..., None], tau_stance, tau_swing).reshape(self.num_envs, 12)
         alpha = ((self._ep_t + self._substep * self.physics_dt) / cfg.t_blend).clamp(0.0, 1.0)[:, None]
         tau = (1.0 - alpha) * joint_pd(self.legs, self._q0[:, self.legs.jids], cfg.pd_kp, cfg.pd_kd) + alpha * tau_leg
         tau = torch.nan_to_num(tau, nan=0.0, posinf=0.0, neginf=0.0)

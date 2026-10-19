@@ -71,6 +71,9 @@ class SpotMpcEnvCfg(DirectRLEnvCfg):
     q_pos_xy: float = 100.0
     q_vel_xy: float = 200.0          # velocity weight on flat ground
     q_pitch_down: float = 40.0
+    terrain_cone: bool = False       # friction pyramid about the sensed surface normal instead of world z (not yet benchmarked)
+    contact_aware: bool = False      # a foot the clock puts in stance before it is loaded gets no MPC force and keeps reaching down (not yet benchmarked)
+    touchdown_probe: float = 0.03    # how far below the planned touchdown point an unloaded stance foot reaches [m]
 
     # gait and swing (the flat-ground operating point)
     gait_freq: float = 2.0

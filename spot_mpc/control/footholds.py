@@ -38,3 +38,15 @@ def foothold(P, terrain, com_xy, yaw, v_xy, v_des, stance_T, residual=None):
         fxy = fxy + torch.stack([rx, ry], -1)
     fxy = terrain.project(fxy, P.margin)
     return torch.cat([fxy, terrain.height(fxy[..., 0], fxy[..., 1])[..., None]], -1)
+
+
+def surface_normals(height, x, y, h=0.03):
+    """Unit surface normals (...,3) from one-sided height differences. Per axis the flatter side wins, so a riser next to the
+    foot is ignored while a uniform slope (equal on both sides) is kept."""
+    def slope(dx, dy):
+        z = height(x, y)
+        fwd, bwd = (height(x + dx, y + dy) - z) / h, (z - height(x - dx, y - dy)) / h
+        return torch.where(fwd.abs() < bwd.abs(), fwd, bwd)
+    gx, gy = slope(h, 0.0), slope(0.0, h)
+    n = torch.stack([-gx, -gy, torch.ones_like(gx)], -1)
+    return n / n.norm(dim=-1, keepdim=True)

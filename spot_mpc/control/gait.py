@@ -51,6 +51,12 @@ class BatchedGait:
     def step(self, dt):
         self.phase = torch.remainder(self.phase + self.freq[:, None] * dt, 1.0)
 
+    def set_duty(self, duty):
+        """Change the trot duty factor unless that would flip a leg between stance and swing mid-step (that env retries next tick)."""
+        lo, hi = torch.minimum(duty, self.trot_duty)[:, None], torch.maximum(duty, self.trot_duty)[:, None]
+        flips = ((self.phase >= lo) & (self.phase < hi)).any(1) & self.trotting
+        self.trot_duty = torch.where(flips, self.trot_duty, duty)
+
     def set_freq(self, freq):
         self.freq = freq.clamp(*self.freq_range)
 
@@ -151,9 +157,8 @@ def build_horizon(P, terrain, gait, x0, cmd, feet_now, anchor, h, foot_res=None)
     zref, pref = body_references(P, terrain, pos_ref, yaw_ref, h)
 
     # vertical speed follows the slope analytically; differencing zref would give spikes at every riser
-    speed = torch.linalg.vector_norm(v_w, dim=-1)[:, None]
-    travel = torch.where(cmd[:, 0:1] < -0.02, -torch.ones_like(speed), torch.ones_like(speed))
-    vz = travel * speed * (-torch.tan(pref.clamp(-1.4, 1.4)))
+    # pitch is the slope along the body x axis, so only the body-x command climbs it (a sideways step follows the contour)
+    vz = (cmd[:, 0] * keep)[:, None] * (-torch.tan(pref.clamp(-1.4, 1.4)))
     z0 = torch.zeros(B, H, device=dev, dtype=dty)
     x_ref = torch.stack([z0, pref, yaw_ref, pos_ref[..., 0], pos_ref[..., 1], zref, z0, z0, wz[:, None] + z0,
                          v_w[:, None, 0] + z0, v_w[:, None, 1] + z0, vz, z0 - GRAV], -1)
