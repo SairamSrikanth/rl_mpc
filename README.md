@@ -51,16 +51,16 @@ command (vx, vy, wz) ──► gait clock ──► reference horizon ──► 
 
 ### Single-rigid-body model
 
-The state is $x=[\Theta,\ p,\ \omega,\ v,\ g]\in\mathbb R^{13}$: roll-pitch-yaw, centre-of-mass position, angular velocity, linear velocity, and a constant slot for gravity. The input is the four stance-foot forces, $u=[f_1;f_2;f_3;f_4]\in\mathbb R^{12}$. With $r_i$ the foot-minus-CoM vector, $m$ the mass, and $I_w=R_z(\psi)\,I_b\,R_z(\psi)^\top$ the body inertia rotated by the reference yaw:
+The state is $x=[\Theta,\ p,\ \omega,\ v,\ g]\in\mathbb R^{13}$: roll-pitch-yaw, centre-of-mass position, angular velocity, linear velocity, and a constant slot for gravity. The input is the four stance-foot forces, $u=[f_1;f_2;f_3;f_4]\in\mathbb R^{12}$. With $r_i$ the foot-minus-CoM vector, $m$ the mass, and $I_w=R_z(\psi)\thinspace I_b\thinspace R_z(\psi)^\top$ the body inertia rotated by the reference yaw:
 
 $$
-\dot p=v,\qquad m\,\dot v=\sum_i f_i+m g,\qquad \dot\omega=I_w^{-1}\sum_i r_i\times f_i,\qquad \dot\Theta\approx R_z(\psi)^\top\omega .
+\dot p=v,\qquad m\thinspace \dot v=\sum_i f_i+m g,\qquad \dot\omega=I_w^{-1}\sum_i r_i\times f_i,\qquad \dot\Theta\approx R_z(\psi)^\top\omega .
 $$
 
 Discretised with step $\Delta t=0.025$ s (second-order terms in position and attitude), a foot force changes the state by
 
 $$
-\Delta v=\tfrac{\Delta t}{m}f_i,\quad \Delta p=\tfrac{\Delta t^2}{2m}f_i,\quad \Delta\omega=\Delta t\,I_w^{-1}[r_i]_\times f_i,\quad \Delta\Theta=\tfrac{\Delta t^2}{2}R_z^\top I_w^{-1}[r_i]_\times f_i ,
+\Delta v=\tfrac{\Delta t}{m}f_i,\quad \Delta p=\tfrac{\Delta t^2}{2m}f_i,\quad \Delta\omega=\Delta t\thinspace I_w^{-1}[r_i]_\times f_i,\quad \Delta\Theta=\tfrac{\Delta t^2}{2}R_z^\top I_w^{-1}[r_i]_\times f_i ,
 $$
 
 giving $x_{k+1}=A_kx_k+B_ku_k$, with $A_k,B_k$ rebuilt every tick from the horizon's foot positions and yaw.
@@ -70,12 +70,12 @@ giving $x_{k+1}=A_kx_k+B_ku_k$, with $A_k,B_k$ rebuilt every tick from the horiz
 Over a horizon of $H=16$ steps (0.4 s), stacking $X=[x_1;\dots;x_H]$ and $U=[u_0;\dots;u_{H-1}]$ gives $X=X_\text{free}(x_0)+B_qU$ (condensing). The cost tracks a reference trajectory with diagonal weights $Q$ and penalises force magnitude and force rate:
 
 $$
-\min_U\ \sum_{k=1}^{H}\|x_k-x_k^\text{ref}\|_Q^2+r_\alpha\|u_{k-1}\|^2+r_{\Delta}\|u_{k-1}-u_{k-2}\|^2
+\min_U\ \sum_{k=1}^{H}\Vert x_k-x_k^\text{ref}\Vert _Q^2+r_\alpha\Vert u_{k-1}\Vert ^2+r_{\Delta}\Vert u_{k-1}-u_{k-2}\Vert ^2
 \quad\Longleftrightarrow\quad
 \min_U\ \tfrac12U^\top PU+q^\top U ,
 $$
 
-with $P=2B_q^\top QB_q+2r_\alpha I+2r_\Delta D^\top D$ and $q=2B_q^\top Q\,(X_\text{free}-X^\text{ref})$ (plus the force-rate term on the previous force). Constraints, per foot and per step:
+with $P=2B_q^\top QB_q+2r_\alpha I+2r_\Delta D^\top D$ and $q=2B_q^\top Q\thinspace (X_\text{free}-X^\text{ref})$ (plus the force-rate term on the previous force). Constraints, per foot and per step:
 
 $$
 |f_x|\le\mu f_z,\quad |f_y|\le\mu f_z,\quad 0\le f_z\le f_\text{max}\ \text{(stance)},\quad f=0\ \text{(swing)},\quad \big|(-J^\top f)_j\big|\le\tau_j^\text{max}.
@@ -88,8 +88,8 @@ The friction pyramid ($\mu=0.6$), the force bound ($f_\text{max}=220$ N) and the
 The QP is solved for every robot at once on the GPU by an OSQP-style ADMM with a **fixed** number of iterations ($K=30$, $\rho=0.003$, $\sigma=10^{-6}$, over-relaxation $\alpha=1.6$), warm-started from the previous tick shifted by one step:
 
 $$
-\tilde x=(P+\sigma I+\rho A^\top\!A)^{-1}\!\big(\sigma x-q+A^\top(\rho z-y)\big),\quad
-z^{+}=\Pi_{[\ell,u]}\!\Big(\alpha A\tilde x+(1-\alpha)z+\tfrac{y}{\rho}\Big),\quad
+\tilde x=(P+\sigma I+\rho A^\top A)^{-1}\big(\sigma x-q+A^\top(\rho z-y)\big),\quad
+z^{+}=\Pi_{[\ell,u]}\Big(\alpha A\tilde x+(1-\alpha)z+\tfrac{y}{\rho}\Big),\quad
 y^{+}=y+\rho\big(\alpha A\tilde x+(1-\alpha)z-z^{+}\big).
 $$
 
@@ -99,7 +99,7 @@ A fixed iteration count is not a converged solution, so the applied force is not
 
 - **Clock trot:** frequency 2 Hz, duty 0.6, phase offsets $(0,\tfrac12,\tfrac12,0)$.
 - **Footholds (Raibert):** the touchdown point of foot $i$ is
-  $p_i^\text{td}=c_{xy}(t_\text{td})+R(\psi)\,n_i+\tfrac{T_\text{st}}{2}\,v+k_d\,(v-v^\text{des})$,
+  $p_i^\text{td}=c_{xy}(t_\text{td})+R(\psi)\thinspace n_i+\tfrac{T_\text{st}}{2}\thinspace v+k_d\thinspace (v-v^\text{des})$,
   with the correction capped and $n_i$ the nominal hip offset. The point is then moved to the best of a 5 × 5 grid of shifts within ±0.08 m: a candidate is penalised when the terrain around it deviates from a local plane by more than the flat tolerance (2 cm), so uniform slopes cost nothing and riser edges repel the foot. Its height is read from the elevation map.
 - **Body reference:** height $z^\text{ref}=h_\text{des}+\overline h(\text{four nominal feet})$ and pitch $\theta^\text{ref}=-\arctan\frac{\bar h_\text{front}-\bar h_\text{rear}}{L}$, so the body follows the terrain under it.
 - **Swing:** a smoothstep path with the smallest apex that clears the terrain by a margin $c$. Because the vertical profile is linear in the apex, every sample $s$ along the swing gives a lower bound $z_\text{apex}\ge\frac{h_\text{max}(s)+c-\text{const}(s)}{\text{coeff}(s)}$, and the apex is the largest of them.
@@ -111,14 +111,14 @@ All the numbers above that shape the gait ($k_d$, apex, clearance, foothold marg
 The controller can switch between operating points. The previewed pitch over the horizon, in the direction of travel $s=\pm1$, gives an ascent and a descent steepness
 
 $$
-a=\max_k\big(-s\,\theta_k^\text{ref}\big)_+,\qquad d=\max_k\big(s\,\theta_k^\text{ref}\big)_+,\qquad
-w_\text{up}=\mathrm{clip}\!\big(\tfrac{a}{\theta_s}\big)\,[\text{forward}],\quad w_\text{back}=\mathrm{clip}\!\big(\tfrac{d}{\theta_s}\big)\,[\text{backward}],
+a=\max_k\big(-s\thinspace \theta_k^\text{ref}\big)_+,\qquad d=\max_k\big(s\thinspace \theta_k^\text{ref}\big)_+,\qquad
+w_\text{up}=\mathrm{clip}\big(\tfrac{a}{\theta_s}\big)\thinspace [\text{forward}],\quad w_\text{back}=\mathrm{clip}\big(\tfrac{d}{\theta_s}\big)\thinspace [\text{backward}],
 $$
 
 with $\theta_s=0.15$ rad, and every scheduled parameter is blended as
 
 $$
-\theta(t)=\theta_\text{flat}+w_\text{up}\,(\theta_\text{up}-\theta_\text{flat})+w_\text{back}\,(\theta_\text{back}-\theta_\text{flat}).
+\theta(t)=\theta_\text{flat}+w_\text{up}\thinspace (\theta_\text{up}-\theta_\text{flat})+w_\text{back}\thinspace (\theta_\text{back}-\theta_\text{flat}).
 $$
 
 On flat ground the controller is exactly the baseline. The two other sets are what the next two sections try to improve: section 3 by learning a correction every tick, section 4 by searching for the best $\theta_\text{up}$ and $\theta_\text{back}$ offline.
@@ -137,11 +137,11 @@ The policy outputs $a\in[-1,1]^{23}$: 19 residuals and 4 tuning outputs.
 
 | output | size | where it acts |
 |---|---|---|
-| gait frequency | 1 | $f=f_\text{op}+\Delta f_\text{max}\,a_f$ (rate-limited) |
+| gait frequency | 1 | $f=f_\text{op}+\Delta f_\text{max}\thinspace a_f$ (rate-limited) |
 | body acceleration | 6 | a constant linear/angular acceleration added to the SRB prediction over the horizon, rotated from body to world frame |
-| foothold | 8 | $p_i^\text{td}\mathrel{+}=R(\psi)\,s_\text{foot}\,a_{\text{foot},i}$ (±2 cm) |
-| swing apex | 4 | $z_{\text{apex},i}\mathrel{+}=s_\text{apex}\,a_{\text{apex},i}$ (±2 cm) |
-| tuning ("meta") | 4 | speed scale $1+0.35\,a_0$; velocity weight $\times e^{a_1}$; duty $+0.05\,a_2$; pitch weight $\times e^{a_3}$ |
+| foothold | 8 | $p_i^\text{td}\mathrel{+}=R(\psi)\thinspace s_\text{foot}\thinspace a_{\text{foot},i}$ (±2 cm) |
+| swing apex | 4 | $z_{\text{apex},i}\mathrel{+}=s_\text{apex}\thinspace a_{\text{apex},i}$ (±2 cm) |
+| tuning ("meta") | 4 | speed scale $1+0.35\thinspace a_0$; velocity weight $\times e^{a_1}$; duty $+0.05\thinspace a_2$; pitch weight $\times e^{a_3}$ |
 
 The acceleration residual enters the model as a disturbance $d_k(\hat a)$: $x_{k+1}=A_kx_k+B_ku_k+d_k(\hat a)$, so the QP still enforces the force constraints on the corrected prediction. Residuals are rate-limited, and in the lane task they are gated to where the scan shows a riser.
 
@@ -150,7 +150,7 @@ The acceleration residual enters the model as a disturbance $d_k(\hat a)$: $x_{k
 - **Algorithm:** PPO ([rsl-rl](https://github.com/leggedrobotics/rsl_rl)) with clipped objective $L=\mathbb E\big[\min\big(r_t\hat A_t,\ \mathrm{clip}(r_t,1\pm\epsilon)\hat A_t\big)\big]$, $\epsilon=0.1$, GAE ($\gamma=0.99$, $\lambda=0.95$), learning rate either fixed at $3\cdot10^{-5}$ or KL-adaptive (target KL 0.01, starting at $10^{-4}$, $\epsilon=0.2$), actor and critic MLPs of $[512,256,128]$, 256 parallel robots, 24 steps per environment per update, up to 1500 iterations.
 - **Exploration:** a small initial action noise ($\sigma_0=0.08$), because stair success is knife-edge in the controller and a noise level of 0.3 halved it.
 - **Observation:** body velocity and angular velocity in the body frame, gravity direction, command, joint positions and velocities, gait phase and contact schedule, measured foot loads, previous action, the previewed pitch and steepness, and a terrain scan. The critic additionally sees contact forces, the MPC's commanded forces and the true height above the floor.
-- **Reward (dense, shaped):** progress (forward distance plus $3\times$ height gained), velocity tracking $\exp(-\|v-v^\text{cmd}\|^2/\sigma^2)$, an orientation penalty on $\phi^2+(\theta-\theta^\text{ref})^2$, an action-rate penalty, a penalty for legs or body touching terrain, an overspeed penalty on descents, tracking of the vertical speed the slope asks for, and terminal terms (fall −10, success +20). Reaching the goal **terminates** the episode, so PPO does not bootstrap a value past it; running out of time is a **truncation**, which PPO bootstraps and which carries no penalty (a penalty would also need the time left in the observation, which the policy does not see). The general task adds **Lagrangian safety costs** (unloaded stance, a tilt barrier with a control-barrier-function condition, overspeed, link contact) whose multipliers grow while a running cost exceeds its budget.
+- **Reward (dense, shaped):** progress (forward distance plus $3\times$ height gained), velocity tracking $\exp(-\Vert v-v^\text{cmd}\Vert ^2/\sigma^2)$, an orientation penalty on $\phi^2+(\theta-\theta^\text{ref})^2$, an action-rate penalty, a penalty for legs or body touching terrain, an overspeed penalty on descents, tracking of the vertical speed the slope asks for, and terminal terms (fall −10, success +20). Reaching the goal **terminates** the episode, so PPO does not bootstrap a value past it; running out of time is a **truncation**, which PPO bootstraps and which carries no penalty (a penalty would also need the time left in the observation, which the policy does not see). The general task adds **Lagrangian safety costs** (unloaded stance, a tilt barrier with a control-barrier-function condition, overspeed, link contact) whose multipliers grow while a running cost exceeds its budget.
 - **Logging and provenance:** every iteration logs the KL step of the policy, its mean action size and the action noise; every checkpoint stores the environment and PPO configuration (including the CMA-ES operating points it was trained against), the git commit and any uncommitted code diff.
 - **Tasks:** `lanes` (hand-made test-world lanes) and `general` (procedural terrain, ten tile families on a difficulty curriculum, with domain randomisation of friction 0.45–1.25, added mass −2 to +4 kg, motor strength ±10%, random pushes and 1 cm sensor noise).
 
@@ -190,11 +190,11 @@ $$
 
 where the second term is a small preference for faster completion. Ascent is scored over `stairs_up` from a standstill 1.2 m before the first riser (34 s limit); backward descent from the upper landing to the bottom (26 s limit). The policy action is zero throughout: CMA-ES tunes the pure MPC.
 
-**CMA-ES** keeps a Gaussian over the unit box. Each generation samples $\lambda=8$ candidates $s_i\sim m+\sigma\,\mathcal N(0,C)$, ranks them by $f$, and updates
+**CMA-ES** keeps a Gaussian over the unit box. Each generation samples $\lambda=8$ candidates $s_i\sim m+\sigma\thinspace \mathcal N(0,C)$, ranks them by $f$, and updates
 
 $$
-m\leftarrow\sum_{i=1}^{\mu}w_i\,s_{i:\lambda},\qquad
-C\leftarrow(1-c_1-c_\mu)\,C+c_1\,p_cp_c^\top+c_\mu\sum_{i=1}^{\mu}w_i\,y_{i:\lambda}y_{i:\lambda}^\top ,
+m\leftarrow\sum_{i=1}^{\mu}w_i\thinspace s_{i:\lambda},\qquad
+C\leftarrow(1-c_1-c_\mu)\thinspace C+c_1\thinspace p_cp_c^\top+c_\mu\sum_{i=1}^{\mu}w_i\thinspace y_{i:\lambda}y_{i:\lambda}^\top ,
 $$
 
 with $y_{i:\lambda}=(s_{i:\lambda}-m_\text{old})/\sigma$, the evolution path $p_c$ and step-size adaptation (pycma defaults). The mean starts at the hand-tuned operating point, $\sigma_0=0.2$ in unit coordinates, and bounds are handled by pycma's boundary transformation. The search ran 12 generations (ascent) and 14 generations (descent).
