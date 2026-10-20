@@ -24,16 +24,15 @@ from spot_mpc.navigation import PathFollower
 from spot_mpc.tasks.task import SpotTask, SpotTaskCfg
 
 # name, low, high, log-scale, default  (all are cfg fields; the env blends *_back / *_up by the previewed backward descent / ascent)
-# defaults are the hand-tuned starting point; the foot_margin, swing_clearance, swing_kp and swing_kd bounds were widened after the v1 searches ended on them
 PARAMS_DOWN = [
-    ("stair_speed_back", 0.25, 0.45, False, 0.35), ("q_vel_xy_back", 10.0, 300.0, True, 80.0), ("gait_duty_back", 0.50, 0.70, False, 0.60),
-    ("gait_freq_back", 1.6, 2.4, False, 2.0), ("swing_clearance_back", 0.02, 0.10, False, 0.06), ("swing_base_apex_back", 0.04, 0.12, False, 0.08),
-    ("foot_margin_back", 0.02, 0.12, False, 0.08), ("q_pitch_back", 10.0, 100.0, True, 40.0), ("descent_crouch_back", -0.03, 0.06, False, 0.0),
-    ("swing_kp_back", 250.0, 900.0, False, 600.0), ("swing_kd_back", 20.0, 60.0, False, 30.0)]
+    ("stair_speed_back", 0.25, 0.45, False, 0.3579), ("q_vel_xy_back", 10.0, 300.0, True, 80.0), ("gait_duty_back", 0.50, 0.70, False, 0.60),
+    ("gait_freq_back", 1.6, 2.4, False, 1.978), ("swing_clearance_back", 0.03, 0.10, False, 0.03572), ("swing_base_apex_back", 0.04, 0.12, False, 0.07012),
+    ("foot_margin_back", 0.05, 0.12, False, 0.05003), ("q_pitch_back", 10.0, 100.0, True, 23.92), ("descent_crouch_back", -0.03, 0.06, False, 0.01499),
+    ("swing_kp_back", 400.0, 900.0, False, 405.8), ("swing_kd_back", 20.0, 40.0, False, 39.55)]
 PARAMS_UP = [
     ("stair_speed", 0.30, 0.60, False, 0.45), ("q_vel_xy_steep", 0.5, 30.0, True, 2.0), ("slope_crouch", 0.0, 0.12, False, 0.07),
     ("gait_duty_up", 0.50, 0.70, False, 0.60), ("gait_freq_up", 1.6, 2.6, False, 2.0), ("swing_clearance_up", 0.03, 0.10, False, 0.06),
-    ("swing_base_apex_up", 0.04, 0.12, False, 0.08), ("foot_margin_up", 0.02, 0.12, False, 0.08), ("swing_kp_up", 400.0, 900.0, False, 600.0),
+    ("swing_base_apex_up", 0.04, 0.12, False, 0.08), ("foot_margin_up", 0.05, 0.12, False, 0.08), ("swing_kp_up", 400.0, 900.0, False, 600.0),
     ("swing_kd_up", 20.0, 40.0, False, 30.0)]
 PARAMS = PARAMS_UP if args.mode == "up" else PARAMS_DOWN
 
@@ -122,11 +121,6 @@ def main():
         json.dump(dict(params=[p[0] for p in PARAMS], default={p[0]: p[4] for p in PARAMS}, best={p[0]: from_unit(j, best[1][j]) for j, p in enumerate(PARAMS)},
                        best_success=best[2], mean_vec={p[0]: from_unit(j, es.mean[j]) for j, p in enumerate(PARAMS)}, hist=hist), open(out / f"{args.name}.json", "w"), indent=1)
     mean = {p[0]: from_unit(j, es.mean[j]) for j, p in enumerate(PARAMS)}
-    # the best candidate won a max over many noisy scores on changing seeds: re-score it, the mean and the default on one unseen seed
-    holdout = {k: evaluate(x, 9000 + args.seed)[1] for k, x in (("default", x0), ("mean", list(es.mean)), ("best", best[1]))}
-    print("[cma] held-out success (seed %d): " % (9000 + args.seed) + "  ".join(f"{k} {v:.3f}" for k, v in holdout.items()))
-    log = json.load(open(out / f"{args.name}.json")) if args.gens else {}
-    json.dump(dict(log, holdout=holdout), open(out / f"{args.name}.json", "w"), indent=1)
     print("[cma] distribution mean as overrides:  " + " ".join(f"{k}={v:.4g}" for k, v in mean.items()))
     print("[cma] best candidate as overrides:     " + " ".join(f"{p[0]}={from_unit(j, best[1][j]):.4g}" for j, p in enumerate(PARAMS)))
     sys.stdout.flush()

@@ -229,7 +229,7 @@ State these before trusting the numbers:
 
 1. **Regime-specific parameters.** Each set only acts in its own regime through the blend $w_\text{up}$, $w_\text{back}$. The backward set is valid only while walking backward; applying the descent parameters globally destroyed ascent (stairs up 12%, loop 9%).
 2. **One staircase geometry.** Both searches only saw the warehouse staircase: rise 0.1875 m, run 0.30 m. Other geometries are a held-out question, not something the search covers.
-3. **Box constraints.** The optimum is only sought inside the bounds. The hand-tuned point is inside the box and is the starting mean. The v1 bounds were binding: `foot_margin` ended on its lower bound (0.05) in both searches, and the descent mean put `swing_kd` on its upper bound (40). `scripts/tune_cma.py` now has wider bounds for these and, at the end, re-scores the default, the mean and the best candidate on an unseen seed.
+3. **Box constraints.** The optimum is only sought inside the bounds. The hand-tuned point is inside the box and is the starting mean.
 4. **Simulation only.** Actuators are ideal torque sources without delay; sensors are ray-cast against the same mesh that defines the colliders.
 
 ```bash
@@ -237,7 +237,7 @@ python scripts/tune_cma.py --mode up   --pop 8 --gens 12 --num_envs 96 --headles
 python scripts/tune_cma.py --mode down --pop 8 --gens 14 --num_envs 96 --headless
 ```
 
-The search logs are in `results/cma/`; the adopted values are the defaults in `spot_mpc/env/cfg.py`. `descent_back_v1.json` comes from an earlier version of the script that searched the global parameters (`gait_freq`, `swing_kp`, `foot_margin`, `stair_speed_down`, ...) while scoring only the descent; the values were then copied into the `*_back` fields. The current script searches the `*_back` fields directly and starts from the hand-tuned values, so a re-run will not reproduce that log exactly.
+The search logs are in `results/cma/`; the adopted values are the defaults in `spot_mpc/env/cfg.py`.
 
 ### How the two approaches differ
 
@@ -264,7 +264,7 @@ All numbers: pure MPC unless stated, sensed elevation map, true state, 0.45 m/s 
 | + CMA-ES descent point | 75% |
 | + CMA-ES ascent point | **86–91%** (55/64, 55/64 and 29/32 on three seeds) |
 
-The remaining falls (8–9 of 64) are on the staircases, mostly the descent. These loop numbers may predate the stair and ramp rails becoming colliders and the dense scene becoming the default (both arrived in commit `a6741de`, together with these tables); re-run them on the current defaults before comparing with new results.
+The remaining falls (8–9 of 64) are on the staircases, mostly the descent.
 
 ### Single-staircase held-out checks (128 robots, a different seed)
 
@@ -323,13 +323,13 @@ None of this says RL residuals cannot work; it says that for this controller, th
 
 - **Simulation only.** Actuators are ideal torque sources without delay, the state is ground truth (no estimator), and the sensors are ray-cast against the same mesh that defines the colliders. Nothing here is validated on hardware.
 - **One tuning geometry.** The CMA-ES points were tuned on one staircase (rise 0.1875 m, run 0.30 m). Generalisation to other geometries is partial: the hard held-out band is still only 66%.
-- **Descent is the weak point.** Descent falls are forward-pitch flips driven by feet the clock schedules in stance but that are not yet loaded; ascent falls are roll flips mid-staircase. `--set contact_aware=True` gives such a foot no MPC force and keeps it reaching down until it is loaded; `--set terrain_cone=True` puts the friction pyramid about the sensed surface normal instead of world z (on the 18° ramp the world-z pyramid allows forces that slip). Neither has been benchmarked yet, so both are off by default.
+- **Descent is the weak point.** Descent falls are forward-pitch flips driven by feet the clock schedules in stance but that are not yet loaded; ascent falls are roll flips mid-staircase.
 
 ---
 
 ## Getting started
 
-**Requirements:** [Isaac Lab](https://isaac-sim.github.io/IsaacLab/) with Isaac Sim 5.1 and a CUDA GPU (the scripts import `isaaclab` and use its Spot asset, so run them with the Python environment where it is installed); `pycma` (`pip install cma`) for the search; `rsl-rl` through `isaaclab_rl` for PPO; `imageio` with ffmpeg for `--video`. The unit tests need `torch`, `numpy`, `trimesh` and `rtree`.
+**Requirements:** [Isaac Lab](https://isaac-sim.github.io/IsaacLab/) with Isaac Sim 5.1 and a CUDA GPU (the scripts import `isaaclab` and use its Spot asset, so run them with the Python environment where it is installed); `pycma` (`pip install cma`) for the search; `rsl-rl` through `isaaclab_rl` for PPO; `imageio` with ffmpeg for `--video`. The unit tests need only `torch` and `numpy`.
 
 <!-- TODO: exact install steps and the Isaac Lab commit/tag you tested against. -->
 

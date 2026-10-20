@@ -165,19 +165,3 @@ if __name__ == "__main__":
             fails += 1
             print(f"  [FAIL] {name}: {ex}")
     sys.exit(1 if fails else 0)
-
-
-def test_terrain_cone_matches_world_pyramid_on_flat_ground_and_tilts_on_a_slope():
-    from spot_mpc.control.mpc import constraint_matrix
-    torch.manual_seed(0)
-    u, contact = torch.randn(64, 12) * 300.0, torch.ones(64, 4)
-    up = torch.tensor([0.0, 0.0, 1.0]).expand(64, 4, 3)
-    assert torch.allclose(project_first_step(u, contact, 0.6, 220.0, None, None, up), project_first_step(u, contact, 0.6, 220.0, None, None))
-    ref = torch.zeros(1)
-    assert torch.allclose(constraint_matrix(None, 0.6, ref, 64, up), constraint_matrix(None, 0.6, ref, 64), atol=1e-6)
-    th = math.radians(18.0)
-    n = torch.tensor([-math.sin(th), 0.0, math.cos(th)]).expand(64, 4, 3)
-    f = project_first_step(u, contact, 0.6, 220.0, None, None, n)
-    fn = (f * n).sum(-1)
-    ft = (f - fn[..., None] * n).norm(dim=-1)
-    assert float(fn.min()) >= -1e-4 and bool((ft <= 0.6 * math.sqrt(2) * fn + 1e-3).all())

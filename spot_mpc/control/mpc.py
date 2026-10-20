@@ -107,24 +107,11 @@ def assemble(free, bq, x_ref, q_diag, r_alpha, r_du, u_prev, H):
     return p, q
 
 
-def contact_frames(normals):
-    """(B,4,3,3) rows t1, t2, n of each foot's contact frame from unit surface normals (B,4,3); n = z gives the world axes."""
-    ey = torch.zeros_like(normals)
-    ey[..., 1] = 1.0
-    t1 = torch.linalg.cross(ey, normals)
-    t1 = t1 / t1.norm(dim=-1, keepdim=True).clamp(min=1e-9)
-    return torch.stack([t1, torch.linalg.cross(normals, t1), normals], -2)
-
-
-def constraint_matrix(torque_map, mu, ref, B, normals=None):
-    """(B,4,7,3): four friction-pyramid rows (about the surface normal if given, else world z), then three joint-torque rows per foot."""
+def constraint_matrix(torque_map, mu, ref, B):
+    """(B,4,7,3): four friction-pyramid rows, then three joint-torque rows per foot."""
     g = ref.new_zeros((B, 4, 7, 3))
-    if normals is None:
-        pyramid = [[1, 0, -mu], [-1, 0, -mu], [0, 1, -mu], [0, -1, -mu]]
-        g[:, :, 0:4, :] = _const(pyramid, ref)
-    else:
-        t1, t2, n = contact_frames(normals).unbind(-2)
-        g[:, :, 0:4, :] = torch.stack([t1 - mu * n, -t1 - mu * n, t2 - mu * n, -t2 - mu * n], -2)
+    pyramid = [[1, 0, -mu], [-1, 0, -mu], [0, 1, -mu], [0, -1, -mu]]
+    g[:, :, 0:4, :] = _const(pyramid, ref)
     if torque_map is not None:
         g[:, :, 4:7, :] = torque_map
     return g
@@ -187,21 +174,16 @@ def shift_state(state):
     return xs, torch.cat([z[:, 1:], z[:, -1:]], 1), torch.cat([y[:, 1:], y[:, -1:]], 1)
 
 
-def project_first_step(u0, contact0, mu, fmax, torque_map, tau_lim, normals=None):
+def project_first_step(u0, contact0, mu, fmax, torque_map, tau_lim):
     """Make the first-step force exactly feasible: swing feet zero, 0 <= Fz <= fmax, friction pyramid,
-    then scale a foot's force down if a joint torque would exceed its limit. With normals, Fz and the pyramid are in the contact frame."""
+    then scale a foot's force down if a joint torque would exceed its limit."""
     B = u0.shape[0]
     f = u0.reshape(B, 4, 3) * contact0[..., None]
-    frames = None if normals is None else contact_frames(normals)
-    if frames is not None:
-        f = torch.einsum("bfij,bfj->bfi", frames, f)
     fz = torch.minimum(torch.clamp(f[..., 2], min=0.0), fmax * contact0)
     lim = mu * fz
     fx = torch.minimum(torch.maximum(f[..., 0], -lim), lim)
     fy = torch.minimum(torch.maximum(f[..., 1], -lim), lim)
     f = torch.stack([fx, fy, fz], -1)
-    if frames is not None:
-        f = torch.einsum("bfji,bfj->bfi", frames, f)
     if torque_map is not None and tau_lim is not None:
         tq = torch.einsum("bfjk,bfk->bfj", torque_map, f).abs()
         worst = (tq / _const(tau_lim, f)).amax(-1)
@@ -234,9 +216,8 @@ class BatchedSrbdMpc:
                       torch.where(drop[:, None, None, None], torch.zeros_like(z), z),
                       torch.where(drop[:, None, None, None], torch.zeros_like(y), y))
 
-    def solve(self, x0, x_ref, r, contact, u_prev=None, torque_map=None, tau_lim=None, q_diag=None, accel_resid=None, shift=True, normals=None):
-        """x0 (B,13), x_ref (B,H,13), r (B,H,4,3), contact (B,H,4), torque_map (B,4,3,3), accel_resid (B,6) in the body frame,
-        normals (B,4,3) unit surface normals under the feet (None: world-z friction pyramid).
+    def solve(self, x0, x_ref, r, contact, u_prev=None, torque_map=None, tau_lim=None, q_diag=None, accel_resid=None, shift=True):
+        """x0 (B,13), x_ref (B,H,13), r (B,H,4,3), contact (B,H,4), torque_map (B,4,3,3), accel_resid (B,6) in the body frame.
         Returns the feasible first-step forces (B,4,3) and a dict with the raw iterate and residual."""
         p = self.p
         x0, x_ref, r = self._t(x0), self._t(x_ref), self._t(r)
@@ -256,8 +237,7 @@ class BatchedSrbdMpc:
         pm, q = assemble(free, bq, x_ref, qd, p.r_alpha, p.r_du, up, H)
         tm = None if torque_map is None else self._t(torque_map)
         use_t = tm is not None and tau_lim is not None
-        nrm = None if normals is None else self._t(normals)
-        g = constraint_matrix(tm if use_t else None, p.mu, x0, B, nrm)
+        g = constraint_matrix(tm if use_t else None, p.mu, x0, B)
         lo, hi = bounds(c, p.fmax, tau_lim if use_t else None, use_t)
         st = self.state if (self.state is not None and self.state[0].shape[0] == B) else None
         if st is not None:
@@ -268,5 +248,5 @@ class BatchedSrbdMpc:
                   torch.where(bad[:, None, None, None], torch.zeros_like(st[2]), st[2]))
         x, state, resid = admm(pm, q, g, lo, hi, self.iters, self.rho, self.sigma, self.alpha, st)
         self.state = shift_state(state) if shift else state
-        f0 = project_first_step(x[:, :NU], c[:, 0], p.mu, p.fmax, tm if use_t else None, tau_lim if use_t else None, nrm)
+        f0 = project_first_step(x[:, :NU], c[:, 0], p.mu, p.fmax, tm if use_t else None, tau_lim if use_t else None)
         return f0, dict(x=x, resid=resid, P=pm, q=q, state=state)
