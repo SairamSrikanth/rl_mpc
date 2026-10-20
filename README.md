@@ -10,7 +10,7 @@ This repository compares two ways of improving a model-based legged controller: 
   <em>One robot, the pure MPC with no learned residual, walking the 90 m loop in the two-floor warehouse at 2x speed: up the staircase, across the upper floor, down and back up the ramp, then backward down the stairs. The upper floor is partly out of frame from this camera.</em>
 </p>
 
-**Contents:** [1. Problem statement](#1-problem-statement) · [2. MPC for legged robots in industrial environments](#2-mpc-for-legged-robots-in-industrial-environments-and-the-baseline) · [3. RL-augmented MPC](#3-rl-augmented-mpc-residuals-and-ppo) · [4. CMA-ES-reinforced MPC](#4-cma-es-reinforced-mpc-parameter-search-and-assumptions) · [5. Results](#5-results) · [6. Limitations](#6-limitations) · [Getting started](#getting-started)
+**Contents:** [1. Problem statement](#1-problem-statement) · [2. MPC for legged robots in industrial environments](#2-mpc-for-legged-robots-in-industrial-environments-and-the-baseline) · [3. RL-augmented MPC](#3-rl-augmented-mpc-residuals-and-ppo) · [4. CMA-ES-reinforced MPC](#4-cma-es-reinforced-mpc-parameter-search-and-assumptions) · [5. Results](#5-results) · [6. Limitations](#6-limitations) · [Getting started](#getting-started) · [References](#references)
 
 ---
 
@@ -24,7 +24,7 @@ The question this repository asks:
 
 > Given a working but hand-tuned MPC, is it better to **add a learned policy inside the control loop** (RL residuals), or to **tune the controller's own parameters offline** (CMA-ES)?
 
-Everything is measured in simulation (Isaac Sim / PhysX), with the robot's true state as feedback.
+Everything is measured in simulation (Isaac Lab [1] on Isaac Sim / PhysX), with the robot's true state as feedback.
 
 ---
 
@@ -67,11 +67,15 @@ flowchart LR
     SW --> SWC
     ST --> ROBOT["Spot, 12 joints"]
     SWC --> ROBOT
+    classDef block fill:#ffffff,stroke:#000000,stroke-width:1px,color:#000000
+    class CMD,GAIT,MAP,PREV,OP,FH,REF,MPC,PROJ,SW,ST,SWC,ROBOT block
+    style TICK fill:#dbeafe,stroke:#60a5fa,color:#000000
+    style LEGS fill:#dbeafe,stroke:#60a5fa,color:#000000
 ```
 
 ### Single-rigid-body model
 
-The state is $x=[\Theta,\ p,\ \omega,\ v,\ g]\in\mathbb R^{13}$: roll-pitch-yaw, centre-of-mass position, angular velocity, linear velocity, and a constant slot for gravity. The input is the four stance-foot forces, $u=[f_1;f_2;f_3;f_4]\in\mathbb R^{12}$. With $r_i$ the foot-minus-CoM vector, $m$ the mass, and $I_w=R_z(\psi)\thinspace I_b\thinspace R_z(\psi)^\top$ the body inertia rotated by the reference yaw:
+The state (as in the convex MPC of [2]) is $x=[\Theta,\ p,\ \omega,\ v,\ g]\in\mathbb R^{13}$: roll-pitch-yaw, centre-of-mass position, angular velocity, linear velocity, and a constant slot for gravity. The input is the four stance-foot forces, $u=[f_1;f_2;f_3;f_4]\in\mathbb R^{12}$. With $r_i$ the foot-minus-CoM vector, $m$ the mass, and $I_w=R_z(\psi)\thinspace I_b\thinspace R_z(\psi)^\top$ the body inertia rotated by the reference yaw:
 
 $$
 \dot p=v,\qquad m\thinspace \dot v=\sum_i f_i+m g,\qquad \dot\omega=I_w^{-1}\sum_i r_i\times f_i,\qquad \dot\Theta\approx R_z(\psi)^\top\omega .
@@ -105,7 +109,7 @@ The friction pyramid ($\mu=0.6$), the force bound ($f_\text{max}=220$ N) and the
 
 ### Solver and exact feasibility
 
-The QP is solved for every robot at once on the GPU by an OSQP-style ADMM with a **fixed** number of iterations ($K=30$, $\rho=0.003$, $\sigma=10^{-6}$, over-relaxation $\alpha=1.6$), warm-started from the previous tick shifted by one step:
+The QP is solved for every robot at once on the GPU by an OSQP-style ADMM [3] with a **fixed** number of iterations ($K=30$, $\rho=0.003$, $\sigma=10^{-6}$, over-relaxation $\alpha=1.6$), warm-started from the previous tick shifted by one step:
 
 $$
 \tilde x=(P+\sigma I+\rho A^\top A)^{-1}\big(\sigma x-q+A^\top(\rho z-y)\big),\quad
@@ -167,7 +171,7 @@ The acceleration residual enters the model as a disturbance $d_k(\hat a)$: $x_{k
 
 ### Training
 
-- **Algorithm:** PPO ([rsl-rl](https://github.com/leggedrobotics/rsl_rl)) with clipped objective $L=\mathbb E\big[\min\big(r_t\hat A_t,\ \mathrm{clip}(r_t,1\pm\epsilon)\hat A_t\big)\big]$, $\epsilon=0.1$, GAE ($\gamma=0.99$, $\lambda=0.95$), learning rate either fixed at $3\cdot10^{-5}$ or KL-adaptive (target KL 0.01, starting at $10^{-4}$, $\epsilon=0.2$), actor and critic MLPs of $[512,256,128]$, 256 parallel robots, 24 steps per environment per update, up to 1500 iterations.
+- **Algorithm:** PPO [4] ([rsl-rl](https://github.com/leggedrobotics/rsl_rl)) with clipped objective $L=\mathbb E\big[\min\big(r_t\hat A_t,\ \mathrm{clip}(r_t,1\pm\epsilon)\hat A_t\big)\big]$, $\epsilon=0.1$, GAE ($\gamma=0.99$, $\lambda=0.95$), learning rate either fixed at $3\cdot10^{-5}$ or KL-adaptive (target KL 0.01, starting at $10^{-4}$, $\epsilon=0.2$), actor and critic MLPs of $[512,256,128]$, 256 parallel robots, 24 steps per environment per update, up to 1500 iterations.
 - **Exploration:** a small initial action noise ($\sigma_0=0.08$), because stair success is knife-edge in the controller and a noise level of 0.3 halved it.
 - **Observation:** body velocity and angular velocity in the body frame, gravity direction, command, joint positions and velocities, gait phase and contact schedule, measured foot loads, previous action, the previewed pitch and steepness, and a terrain scan. The critic additionally sees contact forces, the MPC's commanded forces and the true height above the floor.
 - **Reward (dense, shaped):** progress (forward distance plus $3\times$ height gained), velocity tracking $\exp(-\Vert v-v^\text{cmd}\Vert ^2/\sigma^2)$, an orientation penalty on $\phi^2+(\theta-\theta^\text{ref})^2$, an action-rate penalty, a penalty for legs or body touching terrain, an overspeed penalty on descents, tracking of the vertical speed the slope asks for, and terminal terms (fall −10, success +20). Reaching the goal **terminates** the episode, so PPO does not bootstrap a value past it; running out of time is a **truncation**, which PPO bootstraps and which carries no penalty (a penalty would also need the time left in the observation, which the policy does not see). The general task adds **Lagrangian safety costs** (unloaded stance, a tilt barrier with a control-barrier-function condition, overspeed, link contact) whose multipliers grow while a running cost exceeds its budget.
@@ -189,7 +193,7 @@ Eight PPO residual runs were made. The first six (Lagrangian safety costs, a til
 
 ### Idea
 
-Instead of learning a function of the state, find the best **constant** values of the controller's own parameters, once, offline. The parameters of the ascent and backward-descent operating points are searched with CMA-ES, a derivative-free evolution strategy, scoring each candidate by how many simulated robots complete the staircase. The result is two small parameter tables that drop into the blend of section 2.
+Instead of learning a function of the state, find the best **constant** values of the controller's own parameters, once, offline. The parameters of the ascent and backward-descent operating points are searched with CMA-ES [5], a derivative-free evolution strategy, scoring each candidate by how many simulated robots complete the staircase. The result is two small parameter tables that drop into the blend of section 2.
 
 ### Why a black-box search
 
@@ -392,10 +396,29 @@ results/        cma/*.json (the two CMA-ES searches) · best.pt (best of the fir
 
 Scripts import `spot_mpc` only after the Isaac app has launched (`AppLauncher`), so the package `__init__` files are empty on purpose.
 
+## References
+
+1. NVIDIA, Mayank Mittal, Pascal Roth et al. Isaac Lab: A GPU-Accelerated Simulation Framework for Multi-Modal Robot Learning. [arXiv:2511.04831](https://arxiv.org/abs/2511.04831), 2025.
+2. Jared Di Carlo, Patrick M. Wensing, Benjamin Katz, Gerardo Bledt, Sangbae Kim. Dynamic Locomotion in the MIT Cheetah 3 Through Convex Model-Predictive Control. *IEEE/RSJ International Conference on Intelligent Robots and Systems (IROS)*, 2018. [doi:10.1109/IROS.2018.8594448](https://doi.org/10.1109/IROS.2018.8594448).
+3. Bartolomeo Stellato, Goran Banjac, Paul Goulart, Alberto Bemporad, Stephen Boyd. OSQP: an operator splitting solver for quadratic programs. *Mathematical Programming Computation* 12, 2020, pp. 637–672. [doi:10.1007/s12532-020-00179-2](https://doi.org/10.1007/s12532-020-00179-2).
+4. John Schulman, Filip Wolski, Prafulla Dhariwal, Alec Radford, Oleg Klimov. Proximal Policy Optimization Algorithms. [arXiv:1707.06347](https://arxiv.org/abs/1707.06347), 2017.
+5. Nikolaus Hansen. The CMA Evolution Strategy: A Tutorial. [arXiv:1604.00772](https://arxiv.org/abs/1604.00772), 2016.
+
 ## Citation
 
-<!-- TODO: how you want it cited. -->
+If you use this code or the results, please cite the repository:
+
+```bibtex
+@software{sairamsrikanth2026rlmpc,
+  author = {SairamSrikanth},
+  title  = {rl\_mpc: a convex MPC stair and ramp controller for Spot, with an RL residual and CMA-ES parameter search},
+  year   = {2026},
+  url    = {https://github.com/SairamSrikanth/rl_mpc}
+}
+```
 
 ## License
 
-<!-- TODO: choose one. The robot asset and simulator come from NVIDIA Isaac Lab / Isaac Sim, which have their own licences. -->
+The code in this repository is released under the [MIT License](LICENSE).
+
+It runs on third-party software that is not part of this repository and has its own licences: [Isaac Lab](https://github.com/isaac-sim/IsaacLab) and [rsl-rl](https://github.com/leggedrobotics/rsl_rl) (both BSD-3-Clause), [pycma](https://github.com/CMA-ES/pycma) (BSD-3-Clause), and NVIDIA Isaac Sim with its Spot asset and the warehouse props that dress the scene, which are fetched at run time under NVIDIA's terms. The GIF above shows those props.
